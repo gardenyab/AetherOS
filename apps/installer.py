@@ -60,30 +60,18 @@ class Installler:
         ]
         if not self._run_cmd(rsync_cmd): return False
 
-        self._log("4.5. Поиск и копирование ядра и initrd...", "\033[96m")
+        self._log("4.5. Копирование ядра из Live-окружения...", "\033[96m")
         os.makedirs("/mnt/boot", exist_ok=True)
         
-        # Функция-поиск через find
-        def find_file(pattern):
-            # Ищем внутри примонтированного ISO (папка data)
-            result = subprocess.run(["find", "/run/initramfs/memory/data/", "-name", pattern], 
-                                   capture_output=True, text=True)
-            files = result.stdout.splitlines()
-            return files[0] if files else None
-
-        # Ищем ядро и initrd (используем звездочку для поиска любой версии)
-        kernel = find_file("vmlinuz*")
-        initrd = find_file("initrd*")
-
-        if kernel:
-            self._log(f"[+] Найдено ядро: {kernel}", "\033[92m")
-            self._run_cmd(["cp", "-v", kernel, "/mnt/boot/vmlinuz-6.12.94+deb13-amd64"])
+        # Точный путь к ядру на ISO, который мы раскопали
+        live_kernel = "/run/initramfs/memory/data/linux/boot/vmlinuz"
         
-        if initrd:
-            self._log(f"[+] Найден initrd: {initrd}", "\033[92m")
-            self._run_cmd(["cp", "-v", initrd, "/mnt/boot/initrd.img-6.12.94+deb13-amd64"])
+        if os.path.exists(live_kernel):
+            self._log(f"[+] Найдено ядро на ISO: {live_kernel}", "\033[92m")
+            self._run_cmd(["cp", "-v", live_kernel, "/mnt/boot/vmlinuz-6.12.94+deb13-amd64"])
         else:
-            self._log("[-] Initrd не найден на ISO! Проверь содержимое ISO вручную.", "\033[91m")
+            self._log("[-] Критическая ошибка: vmlinuz не найден на ISO!", "\033[91m")
+            return False
 
         self._log("5. Подготовка fstab...", "\033[96m")
         try:
@@ -107,9 +95,17 @@ class Installler:
         self._log("[*] Обновление пакетов в chroot...", "\033[96m")
         self._run_cmd(["chroot", "/mnt", "apt-get", "update"])
         
-        self._log("[*] Установка grub-pc и os-prober...", "\033[96m")
-        apt_cmd = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends grub-pc os-prober extlinux"
+        self._log("[*] Установка grub-pc, os-prober и initramfs-tools...", "\033[96m")
+        apt_cmd = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends grub-pc os-prober extlinux initramfs-tools"
         self._run_cmd(["chroot", "/mnt", "bash", "-c", apt_cmd])
+
+        # --- ГЕНЕРАЦИЯ ОТСУТСТВУЮЩЕГО INITRD С НУЛЯ ---
+        self._log("[*] Генерация initrd.img для установленной системы...", "\033[96m")
+        gen_initrd_cmd = "update-initramfs -c -k 6.12.94+deb13-amd64"
+        if not self._run_cmd(["chroot", "/mnt", "bash", "-c", gen_initrd_cmd]):
+            self._log("[-] Ошибка генерации initrd! Загрузка системы может не сработать.", "\033[91m")
+        else:
+            self._log("[+] initrd.img успешно собран внутри chroot!", "\033[92m")
 
         self._log("6. Установка GRUB в MBR...", "\033[96m")
         chroot_grub = f"chroot /mnt grub-install {disk}"
@@ -146,3 +142,4 @@ class Installler:
 
         self._log("=== УСТАНОВКА ЗАВЕРШЕНА! МОЖНО ПЕРЕЗАГРУЖАТЬСЯ ===", "\033[92m")
         return True
+
