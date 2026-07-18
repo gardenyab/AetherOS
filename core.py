@@ -59,7 +59,7 @@ def download_app(url):
         print("Error: URL must point to a .py file")
         return
 
-    apps_dir = os.path.join(os.path.dirname(__file__), 'apps')
+    apps_dir = "/root/apps"
     os.makedirs(apps_dir, exist_ok=True)
     target_path = os.path.join(apps_dir, filename)
     temp_path = os.path.join(apps_dir, f"temp_{filename}")
