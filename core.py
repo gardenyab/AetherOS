@@ -13,7 +13,7 @@ def load_apps():
     global MODULES
     new_modules = []
     
-    apps_dir = os.path.join(os.path.dirname(__file__), 'apps')
+    apps_dir = "/root/apps"
     
     if not os.path.exists(apps_dir):
         os.makedirs(apps_dir)
@@ -146,7 +146,7 @@ def delete_app(app_name):
         return
 
     filename = f"{app_name}.py" if not app_name.endswith('.py') else app_name
-    apps_dir = os.path.join(os.path.dirname(__file__), 'apps')
+    apps_dir = "/root/apps"
     target_path = os.path.join(apps_dir, filename)
 
     if not os.path.exists(target_path):
