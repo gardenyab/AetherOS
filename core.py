@@ -6,11 +6,10 @@ import ast
 import importlib
 import urllib.request
 import config as cfg
-from config import loadedApps
 
 MODULES = []
 
-def loadApps():
+def load_apps():
     global MODULES
     new_modules = []
     
@@ -50,7 +49,7 @@ def loadApps():
     updated_modules.extend(new_modules)
     MODULES = updated_modules
 
-def downloadApp(url):
+def download_app(url):
     if not url:
         print("Error: Specify a .py file URL. Usage: install <url>")
         return
@@ -141,7 +140,7 @@ def downloadApp(url):
         if 'temp_path' in locals() and os.path.exists(temp_path):
             os.remove(temp_path)
 
-def deleteApp(app_name):
+def delete_app(app_name):
     if not app_name:
         print("Error: Specify module name. Usage: uninstall <name>")
         return

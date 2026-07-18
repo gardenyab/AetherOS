@@ -34,6 +34,6 @@ class AppStore:
         try:
             self._getAppsList(self.appsListUrl)
             if " ".join(args) not in self.data: print("Unknown app")
-            else: core.downloadApp(self.data[" ".join(args)]["url"])
+            else: core.download_app(self.data[" ".join(args)]["url"])
         except Exception as e:
             print(str(e))

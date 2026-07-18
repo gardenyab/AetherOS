@@ -59,7 +59,7 @@ def update_system():
 
 def start_shell():
     os.system('clear')
-    #core.loadApps()
+    core.load_apps()
     readline.set_history_length(100)
     
     def completer(text, state):
@@ -90,9 +90,9 @@ def start_shell():
             elif cmd == 'clear':
                 os.system('clear')
             elif cmd == 'install':
-                core.downloadApp(args[0] if args else None)
+                core.download_app(args[0] if args else None)
             elif cmd == 'uninstall':
-                core.deleteApp(args[0] if args else None)
+                core.delete_app(args[0] if args else None)
             elif cmd == 'update':
                 update_system()
                 input("\nPress Enter to continue...")
