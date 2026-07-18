@@ -5,6 +5,7 @@ import sys
 import inspect
 import importlib
 import urllib.request
+import readline  # Библиотека для истории, стрелочек и автодополнения
 
 # Список динамически загруженных экземпляров классов-приложений
 MODULES = []
@@ -44,7 +45,6 @@ def download_app(url):
         print("Ошибка: Укажите ссылку на .py файл. Пример: install https://site.com/test.py")
         return
 
-    # Достаем имя файла из ссылки (например, test.py)
     filename = url.split('/')[-1]
     if not filename.endswith('.py'):
         print("Ошибка: Ссылка должна вести на файл с расширением .py")
@@ -55,11 +55,8 @@ def download_app(url):
 
     print(f"[!] Скачивание {filename}...")
     try:
-        # Устанавливаем таймаут 10 секунд, чтобы шелл не завис намертво при плохой сети
         urllib.request.urlretrieve(url, target_path)
         print(f"[+] Файл успешно сохранен в {target_path}")
-        
-        # Перезагружаем модули, чтобы новая команда сразу стала доступна
         load_apps()
         print("[+] Список команд успешно обновлен!")
     except Exception as e:
@@ -71,7 +68,6 @@ def delete_app(app_name):
         print("Ошибка: Укажите имя модуля или файла для удаления. Пример: uninstall test")
         return
 
-    # Нормализуем имя, чтобы можно было писать и 'test', и 'test.py'
     if not app_name.endswith('.py'):
         filename = f"{app_name}.py"
     else:
@@ -88,12 +84,10 @@ def delete_app(app_name):
         os.remove(target_path)
         print(f"[+] Приложение {filename} успешно удалено.")
         
-        # Очищаем модуль из кэша сис-импорта Python, если он там был
         module_name = f"apps.{filename[:-3]}"
         if module_name in sys.modules:
             del sys.modules[module_name]
 
-        # Перезагружаем оставшиеся приложения
         load_apps()
         print("[+] Список команд успешно обновлен!")
     except Exception as e:
@@ -157,6 +151,26 @@ def start_shell():
     os.system('clear')
     load_apps()
     
+    # --- Инициализация Readline (Стрелочки, Навигация, Вставка) ---
+    readline.set_history_length(100)
+    
+    # Функция автодополнения по Tab
+    def completer(text, state):
+        builtins = ['help', 'clear', 'install', 'uninstall', 'update', 'shutdown', 'exit', 'q']
+        app_cmds = []
+        for module in MODULES:
+            app_cmds.extend([name for name, _ in inspect.getmembers(module, inspect.ismethod) if not name.startswith('_')])
+        
+        options = [cmd for cmd in (builtins + app_cmds) if cmd.startswith(text)]
+        if state < len(options):
+            return options[state]
+        else:
+            return None
+
+    readline.set_completer(completer)
+    readline.parse_and_bind("tab: complete")
+    # -------------------------------------------------------------
+    
     free_space = shutil.disk_usage('/').free // (1024**2)
     
     print("AetherOS v1")
@@ -164,6 +178,7 @@ def start_shell():
     
     while True:
         try:
+            # Исправлено: теперь строка приглашения выводится корректно внутри input
             user_input = input("AetherOS ~ ").strip()
             if not user_input:
                 continue
