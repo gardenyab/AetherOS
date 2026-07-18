@@ -8,6 +8,7 @@ import importlib
 import importlib.util
 import urllib.request
 import readline
+import config as cfg
 
 MODULES = []
 
@@ -168,7 +169,7 @@ def delete_app(app_name):
 
 def show_help():
     load_apps()
-    print("\n              AETHER OS v2.5 — COMMAND REFERENCE")
+    print(f"\n              AETHER OS v{cfg.VERSION} — COMMAND REFERENCE")
     print("====================================================")
     print("📦 Built-in System Commands:")
     print("  ↳ install <url>    - Download and install .py module")
@@ -228,7 +229,7 @@ def start_shell():
     readline.set_completer(completer)
     readline.parse_and_bind("tab: complete")
     
-    print("AetherOS v2.5")
+    print(f"AetherOS v{cfg.VERSION}")
     print("~ Commands: help, clear, install, update, uninstall, shutdown")
     
     while True:
