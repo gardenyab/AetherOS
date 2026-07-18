@@ -12,9 +12,11 @@ import readline
 MODULES = []
 
 def load_apps():
-    """Динамически загружает все модули из папки ./apps/"""
+    """Динамически загружает все модули из папки ./apps/ с жесткой перезаписью дубликатов классов"""
     global MODULES
-    MODULES.clear()
+    # Не очищаем весь список MODULES полностью, если хотим выборочно перезаписывать дубликаты,
+    # либо очищаем, но фильтруем на лету. Безопаснее собирать новый список и фильтровать старые.
+    new_modules = []
     
     apps_dir = os.path.join(os.path.dirname(__file__), 'apps')
     
@@ -29,16 +31,41 @@ def load_apps():
         if filename.endswith('.py') and filename != '__init__.py':
             module_name = f"apps.{filename[:-3]}"
             try:
+                # ХАК ДЛЯ ПЕРЕЗАПИСИ: Удаляем модуль из кэша Python, чтобы он 100% прочитал файл с диска
                 if module_name in sys.modules:
-                    module = importlib.reload(sys.modules[module_name])
-                else:
-                    module = importlib.import_module(module_name)
+                    del sys.modules[module_name]
+                
+                # Импортируем модуль начисто
+                module = importlib.import_module(module_name)
                 
                 for name, obj in inspect.getmembers(module, inspect.isclass):
                     if obj.__module__ == module_name:
-                        MODULES.append(obj())
+                        instance = obj()
+                        
+                        # Проверяем, нет ли уже загруженного класса с таким именем в новом списке
+                        # (на случай, если в разных файлах папки apps лежат классы с одинаковым именем)
+                        new_modules = [m for m in new_modules if m.__class__.__name__ != name]
+                        
+                        new_modules.append(instance)
+                        
             except Exception as e:
                 print(f"[-] Ошибка загрузки приложения {filename}: {e}")
+
+    # Теперь жестко обновляем глобальный список модулей, вычищая старые дубликаты
+    # Если в MODULES были встроенные команды (не из папки apps), мы их сохраняем, 
+    # заменяя только те, чьи имена совпали с новыми классами из папки apps.
+    updated_modules = []
+    new_class_names = {m.__class__.__name__ for m in new_modules}
+    
+    # Оставляем старые системные команды, которых нет среди новых аппов
+    for old_mod in MODULES:
+        if old_mod.__class__.__name__ not in new_class_names:
+            updated_modules.append(old_mod)
+            
+    # Добавляем все свежезагруженные аппы
+    updated_modules.extend(new_modules)
+    
+    MODULES = updated_modules
 
 def download_app(url):
     """Скачивает .py файл по ссылке, извлекает зависимости из класса и сохраняет в ./apps/"""
@@ -229,7 +256,7 @@ def start_shell():
     free_space = shutil.disk_usage('/').free // (1024**2)
     
     print("AetherOS v1")
-    print("~ Commands: help, clear, install, install-system, update, uninstall, shutdown")
+    print("~ Commands: help, clear, install, update, uninstall, shutdown")
     
     while True:
         try:
