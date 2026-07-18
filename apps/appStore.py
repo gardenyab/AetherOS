@@ -24,7 +24,7 @@ class AppStore:
             text = []
             for i in self.data.keys():
                 text.append(f"•. {i} - {self.data[i]['version']}.\n    {self.data[i]['description']}")
-            messageText = "\n".join(text)
+            messageText = "AetherOS AppStore\n" + "\n".join(text)
             print(messageText)
         except Exception as e:
             print(str(e))
