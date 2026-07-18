@@ -16,7 +16,7 @@ class AppStore:
         except Exception:
             self.data = {} 
     
-    def show_apps(self):
+    def show_apps(self, args):
         """ok"""
         try:
             self._getAppsList(self.appsListUrl)
