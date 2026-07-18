@@ -39,7 +39,7 @@ def load_apps():
                 print(f"[-] Ошибка загрузки приложения {filename}: {e}")
 
 def download_app(url):
-    """Скачивает .py файл по ссылке, проверяет pip-зависимости и сохраняет в ./apps/"""
+    """Скачивает .py файл по ссылке, извлекает зависимости из класса и сохраняет в ./apps/"""
     if not url:
         print("Ошибка: Укажите ссылку на .py файл. Пример: install https://site.com/test.py")
         return
@@ -50,7 +50,6 @@ def download_app(url):
         return
 
     apps_dir = os.path.join(os.path.dirname(__file__), 'apps')
-    # На всякий случай проверяем, существует ли папка apps
     os.makedirs(apps_dir, exist_ok=True)
     target_path = os.path.join(apps_dir, filename)
 
@@ -59,38 +58,62 @@ def download_app(url):
         urllib.request.urlretrieve(url, target_path)
         print(f"[+] Файл успешно сохранен в {target_path}")
         
-        # --- БЛОК АВТОУСТАНОВКИ ЗАВИСИМОСТЕЙ ---
+        # --- БЛОК БЕЗОПАСНОГО АНАЛИЗА И АВТОУСТАНОВКИ ЗАВИСИМОСТЕЙ ---
+        reqs = []
         try:
-            # Динамически загружаем скачанный модуль для проверки переменных
-            module_name = filename[:-3]  # отрезаем '.py'
+            # Читаем файл и парсим его в абстрактное синтаксическое дерево (AST)
+            # Это позволяет найти переменную внутри класса без выполнения кода (чтобы не поймать ModuleNotFoundError)
+            with open(target_path, "r", encoding="utf-8") as f:
+                node = ast.parse(f.read(), filename=target_path)
+
+            for child in ast.iter_child_nodes(node):
+                # Ищем объявления классов в файле
+                if isinstance(child, ast.ClassDef):
+                    for sub_child in child.body:
+                        # Ищем присвоение переменной внутри класса (например, requirements = [...])
+                        if isinstance(sub_child, ast.Assign):
+                            for target in sub_child.targets:
+                                if isinstance(target, ast.Name) and target.id == 'requirements':
+                                    # Проверяем, что значение является списком
+                                    if isinstance(sub_child.value, ast.List):
+                                        reqs = [el.value for el in sub_child.value.elts if isinstance(el, ast.Constant)]
+                                    break
+                    if reqs:
+                        break # Если нашли requirements в первом же классе, останавливаемся
+                        
+        except Exception as parse_err:
+            print(f"[-] Предупреждение при анализе структуры файла: {parse_err}")
+
+        # Если зависимости найдены, устанавливаем их через pip
+        if reqs:
+            print(f"[!] Обнаружены pip-зависимости класса: {', '.join(reqs)}")
+            print("[!] Установка зависимостей через pip...")
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", *reqs])
+                print("[+] Все зависимости успешно установлены!")
+            except Exception as pip_err:
+                print(f"[-] Ошибка при установке пакетов через pip: {pip_err}")
+                print("[!] Пробуем продолжить, но приложение может упасть при запуске.")
+        else:
+            print("[*] У класса не обнаружено pip-зависимостей.")
+        # ------------------------------------------------------------
+
+        # Теперь, когда все зависимости на месте, модуль можно безопасно импортировать
+        try:
+            module_name = filename[:-3]
             spec = importlib.util.spec_from_file_location(module_name, target_path)
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
             
-            # Проверяем, есть ли внутри файла переменная requirements
-            # Поддерживаем как глобальную переменную requirements, так и self.requirements внутри класса,
-            # если ты создаешь экземпляр. Здесь проверяем глобальную в модуле:
-            if hasattr(mod, 'requirements'):
-                reqs = mod.requirements
-                if isinstance(reqs, list) and reqs:
-                    print(f"[!] Обнаружены pip-зависимости: {', '.join(reqs)}")
-                    print("[!] Установка зависимостей через pip...")
-                    
-                    # Запускаем pip install для всех зависимостей из списка
-                    subprocess.check_call([sys.executable, "-m", "pip", "install", *reqs])
-                    print("[+] Все зависимости успешно установлены!")
-                elif reqs:
-                    print("[-] Предупреждение: Переменная 'requirements' должна быть списком (list).")
-        except Exception as pip_err:
-            print(f"[-] Ошибка при анализе или установке зависимостей: {pip_err}")
-            print("[!] Файл сохранен, но приложение может работать некорректно без ручной установки пакетов.")
-        # ----------------------------------------
+            # Регистрируем новые команды в системе
+            load_apps()
+            print("[+] Список команд успешно обновлен!")
+        except Exception as load_err:
+            print(f"[-] Ошибка при загрузке модуля в систему: {load_err}")
 
-        load_apps()
-        print("[+] Список команд успешно обновлен!")
     except Exception as e:
         print(f"[-] Не удалось скачать файл: {e}")
-
+        
 def delete_app(app_name):
     """Удаляет приложение из папки ./apps/"""
     if not app_name:
