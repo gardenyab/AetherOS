@@ -11,6 +11,7 @@ def log(text, color=""):
 def run_cmd(cmd):
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if res.returncode != 0:
+        print(res.stderr)
         log(f"ОШИБКА: {' '.join(cmd)}\n{res.stderr}", "\033[91m")
         return False
     return True
