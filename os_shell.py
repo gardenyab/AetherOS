@@ -59,7 +59,7 @@ def update_system():
 
 def start_shell():
     os.system('clear')
-    core.loadApps()
+    #core.loadApps()
     readline.set_history_length(100)
     
     def completer(text, state):
