@@ -39,7 +39,7 @@ def load_apps():
                 print(f"[-] Ошибка загрузки приложения {filename}: {e}")
 
 def download_app(url):
-    """Скачивает .py файл по ссылке и сохраняет в ./apps/"""
+    """Скачивает .py файл по ссылке, проверяет pip-зависимости и сохраняет в ./apps/"""
     if not url:
         print("Ошибка: Укажите ссылку на .py файл. Пример: install https://site.com/test.py")
         return
@@ -50,12 +50,42 @@ def download_app(url):
         return
 
     apps_dir = os.path.join(os.path.dirname(__file__), 'apps')
+    # На всякий случай проверяем, существует ли папка apps
+    os.makedirs(apps_dir, exist_ok=True)
     target_path = os.path.join(apps_dir, filename)
 
     print(f"[!] Скачивание {filename}...")
     try:
         urllib.request.urlretrieve(url, target_path)
         print(f"[+] Файл успешно сохранен в {target_path}")
+        
+        # --- БЛОК АВТОУСТАНОВКИ ЗАВИСИМОСТЕЙ ---
+        try:
+            # Динамически загружаем скачанный модуль для проверки переменных
+            module_name = filename[:-3]  # отрезаем '.py'
+            spec = importlib.util.spec_from_file_location(module_name, target_path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            
+            # Проверяем, есть ли внутри файла переменная requirements
+            # Поддерживаем как глобальную переменную requirements, так и self.requirements внутри класса,
+            # если ты создаешь экземпляр. Здесь проверяем глобальную в модуле:
+            if hasattr(mod, 'requirements'):
+                reqs = mod.requirements
+                if isinstance(reqs, list) and reqs:
+                    print(f"[!] Обнаружены pip-зависимости: {', '.join(reqs)}")
+                    print("[!] Установка зависимостей через pip...")
+                    
+                    # Запускаем pip install для всех зависимостей из списка
+                    subprocess.check_call([sys.executable, "-m", "pip", "install", *reqs])
+                    print("[+] Все зависимости успешно установлены!")
+                elif reqs:
+                    print("[-] Предупреждение: Переменная 'requirements' должна быть списком (list).")
+        except Exception as pip_err:
+            print(f"[-] Ошибка при анализе или установке зависимостей: {pip_err}")
+            print("[!] Файл сохранен, но приложение может работать некорректно без ручной установки пакетов.")
+        # ----------------------------------------
+
         load_apps()
         print("[+] Список команд успешно обновлен!")
     except Exception as e:
