@@ -25,7 +25,7 @@ def do_install():
         log(f"Ошибка: Диск {disk} не найден!", "\033[91m")
         return False
 
-    log("1. Разметка диска...", "\033[96m")
+    log("1. Разметка диска1...", "\033[96m")
     if not run_cmd(["parted", "-s", disk, "mklabel", "msdos"]): return False
     if not run_cmd(["parted", "-s", disk, "mkpart", "primary", "ext4", "1MiB", "100%"]): return False
     if not run_cmd(["parted", "-s", disk, "set", "1", "boot", "on"]): return False
