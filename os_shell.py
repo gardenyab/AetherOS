@@ -4,6 +4,7 @@ import shutil
 import sys
 import inspect
 import importlib
+import urllib.request
 
 # Список динамически загруженных экземпляров классов-приложений
 MODULES = []
@@ -37,6 +38,67 @@ def load_apps():
             except Exception as e:
                 print(f"[-] Ошибка загрузки приложения {filename}: {e}")
 
+def download_app(url):
+    """Скачивает .py файл по ссылке и сохраняет в ./apps/"""
+    if not url:
+        print("Ошибка: Укажите ссылку на .py файл. Пример: install https://site.com/test.py")
+        return
+
+    # Достаем имя файла из ссылки (например, test.py)
+    filename = url.split('/')[-1]
+    if not filename.endswith('.py'):
+        print("Ошибка: Ссылка должна вести на файл с расширением .py")
+        return
+
+    apps_dir = os.path.join(os.path.dirname(__file__), 'apps')
+    target_path = os.path.join(apps_dir, filename)
+
+    print(f"[!] Скачивание {filename}...")
+    try:
+        # Устанавливаем таймаут 10 секунд, чтобы шелл не завис намертво при плохой сети
+        urllib.request.urlretrieve(url, target_path)
+        print(f"[+] Файл успешно сохранен в {target_path}")
+        
+        # Перезагружаем модули, чтобы новая команда сразу стала доступна
+        load_apps()
+        print("[+] Список команд успешно обновлен!")
+    except Exception as e:
+        print(f"[-] Не удалось скачать файл: {e}")
+
+def delete_app(app_name):
+    """Удаляет приложение из папки ./apps/"""
+    if not app_name:
+        print("Ошибка: Укажите имя модуля или файла для удаления. Пример: uninstall test")
+        return
+
+    # Нормализуем имя, чтобы можно было писать и 'test', и 'test.py'
+    if not app_name.endswith('.py'):
+        filename = f"{app_name}.py"
+    else:
+        filename = app_name
+
+    apps_dir = os.path.join(os.path.dirname(__file__), 'apps')
+    target_path = os.path.join(apps_dir, filename)
+
+    if not os.path.exists(target_path):
+        print(f"Ошибка: Файл {filename} не найден в папке ./apps/")
+        return
+
+    try:
+        os.remove(target_path)
+        print(f"[+] Приложение {filename} успешно удалено.")
+        
+        # Очищаем модуль из кэша сис-импорта Python, если он там был
+        module_name = f"apps.{filename[:-3]}"
+        if module_name in sys.modules:
+            del sys.modules[module_name]
+
+        # Перезагружаем оставшиеся приложения
+        load_apps()
+        print("[+] Список команд успешно обновлен!")
+    except Exception as e:
+        print(f"[-] Не удалось удалить файл: {e}")
+
 def show_help():
     """Автоматический генератор справки по системе и модулям"""
     load_apps()
@@ -44,12 +106,13 @@ def show_help():
     print("\n      AETHER OS v1 — СПРАВКА ПО КОМАНДАМ")
     print("====================================================")
     print("📦 Встроенные системные команды:")
-    print(f"  ↳ install      - Запустить установщик системы")
-    print(f"  ↳ update       - Проверить и установить обновления из Git")
-    print(f"  ↳ shutdown     - Выключить ПК")
-    print(f"  ↳ help         - Показать эту справку")
-    print(f"  ↳ clear        - Очистить экран")
-    print(f"  ↳ exit / q     - Выйти из оболочки")
+    print("  ↳ install <url> - Скачать и установить .py модуль по ссылке")
+    print("  ↳ uninstall <name> - Удалить установленный модуль")
+    print("  ↳ update       - Проверить и установить обновления из Git")
+    print("  ↳ shutdown     - Выключить ПК")
+    print("  ↳ help         - Показать эту справку")
+    print("  ↳ clear        - Очистить экран")
+    print("  ↳ exit / q     - Выйти из оболочки")
     
     if not MODULES:
         print("\n📦 Модули в ./apps/ не обнаружены.")
@@ -94,18 +157,14 @@ def start_shell():
     os.system('clear')
     load_apps()
     
-    # Считаем место для красивого приветствия
     free_space = shutil.disk_usage('/').free // (1024**2)
     
-    print("----------------------------------------------------")
-    print(f"       Добро пожаловать в AETHER OS v1")
-    print(f"       Свободно на диске: {free_space} MB")
-    print("       Введите 'help' для вывода списка команд.")
-    print("----------------------------------------------------")
+    print("AetherOS v1")
+    print("~ Commands: help, clear, install, update, uninstall, shutdown")
     
     while True:
         try:
-            user_input = input("AetherOS # ").strip()
+            user_input = input("AetherOS ~ ").strip()
             if not user_input:
                 continue
                 
@@ -113,7 +172,6 @@ def start_shell():
             cmd = parts[0].lower()
             args = parts[1:]
             
-            # 1. Обработка встроенных системных команд
             if cmd == 'help':
                 show_help()
                 continue
@@ -121,9 +179,12 @@ def start_shell():
                 os.system('clear')
                 continue
             elif cmd == 'install':
-                print("\nStarting installer...")
-                subprocess.run(["python3", "/root/installer.py"])
-                input("\nInstaller finished. Press Enter to continue...")
+                url_arg = args[0] if args else None
+                download_app(url_arg)
+                continue
+            elif cmd == 'uninstall':
+                app_arg = args[0] if args else None
+                delete_app(app_arg)
                 continue
             elif cmd == 'update':
                 update_system()
@@ -137,7 +198,6 @@ def start_shell():
                 print("Exiting Aether OS...")
                 break
                 
-            # 2. Поиск команды в динамических модулях из ./apps/
             command_found = False
             for module in MODULES:
                 if hasattr(module, cmd):
