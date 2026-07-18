@@ -19,7 +19,7 @@ class SystemInstaller:
             return False
         return True
 
-    def install_system(self, args):
+    def install_system_legacy(self, args):
         """install-system — Install AetherOS onto the local disk (/dev/sda)"""
         disk = "/dev/sda"
         part = f"{disk}1"
@@ -162,3 +162,67 @@ class SystemInstaller:
 
         self._log("\n=== INSTALLATION SUCCESSFUL! YOU CAN NOW REBOOT YOUR SYSTEM ===", "\033[92m")
         return True
+
+    def install_system_efi(self, args):
+        """install-system-efi — Install AetherOS onto the local disk using GPT/EFI"""
+        disk = "/dev/sda"
+        part_efi = f"{disk}1"
+        part_root = f"{disk}2"
+        
+        self._log("=== AETHEROS EFI INSTALLATION WIZARD ===", "\033[93m")
+
+        # 1. Разметка GPT
+        self._log("[*] Partitioning (GPT)...", "\033[96m")
+        self._run_cmd(["parted", "-s", disk, "mklabel", "gpt"])
+        self._run_cmd(["parted", "-s", disk, "mkpart", "ESP", "fat32", "1MiB", "512MiB"])
+        self._run_cmd(["parted", "-s", disk, "set", "1", "esp", "on"])
+        self._run_cmd(["parted", "-s", disk, "mkpart", "primary", "ext4", "512MiB", "100%"])
+
+        # 2. Форматирование
+        self._log("[*] Formatting...", "\033[96m")
+        self._run_cmd(["mkfs.vfat", "-F", "32", part_efi])
+        self._run_cmd(["mkfs.ext4", "-F", part_root])
+
+        # 3. Монтирование
+        os.makedirs("/mnt/boot/efi", exist_ok=True)
+        self._run_cmd(["mount", part_root, "/mnt"])
+        self._run_cmd(["mount", part_efi, "/mnt/boot/efi"])
+
+        # 4. Копирование файлов (rsync)
+        self._log("[*] Copying files...", "\033[96m")
+        rsync_cmd = ["rsync", "-aHAXx", "--exclude=/proc/*", "--exclude=/sys/*", 
+                     "--exclude=/dev/*", "--exclude=/mnt/*", "--exclude=/tmp/*", 
+                     "--exclude=/run/*", "/", "/mnt/"]
+        self._run_cmd(rsync_cmd)
+
+        # 5. Подготовка окружения
+        self._run_cmd(["mount", "--bind", "/dev", "/mnt/dev"])
+        self._run_cmd(["mount", "--bind", "/proc", "/mnt/proc"])
+        self._run_cmd(["mount", "--bind", "/sys", "/mnt/sys"])
+        self._run_cmd(["mount", "--bind", "/run", "/mnt/run"])
+
+        # 6. Установка пакетов для EFI
+        self._log("[*] Installing EFI bootloader tools...", "\033[96m")
+        chroot_apt = "DEBIAN_FRONTEND=noninteractive apt-get install -y grub-efi-amd64 efibootmgr initramfs-tools"
+        self._run_cmd(["chroot", "/mnt", "bash", "-c", chroot_apt])
+
+        # 7. Генерация fstab (с учетом EFI раздела)
+        self._log("[*] Generating fstab...", "\033[96m")
+        with open("/mnt/etc/fstab", "w") as f:
+            f.write(f"UUID={self._get_uuid(part_root)}  /  ext4  defaults  0  1\n")
+            f.write(f"UUID={self._get_uuid(part_efi)}  /boot/efi  vfat  umask=0077  0  1\n")
+
+        # 8. Установка GRUB EFI
+        self._log("[*] Installing GRUB...", "\033[96m")
+        self._run_cmd(["chroot", "/mnt", "grub-install", "--target=x86_64-efi", 
+                       "--efi-directory=/boot/efi", "--bootloader-id=AetherOS", "--removable"])
+        self._run_cmd(["chroot", "/mnt", "update-grub"])
+
+        # 9. Cleanup
+        for p in ["/run", "/sys", "/proc", "/dev", "/boot/efi"]: self._run_cmd(["umount", "-l", f"/mnt{p}"])
+        self._run_cmd(["umount", "-l", "/mnt"])
+        
+        self._log("[+] EFI Installation Complete!", "\033[92m")
+
+    def _get_uuid(self, dev):
+        return subprocess.check_output(["blkid", "-s", "UUID", "-o", "value", dev]).decode().strip()
