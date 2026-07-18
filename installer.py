@@ -60,11 +60,25 @@ def do_install(disk="/dev/sda"):
     with open("/mnt/etc/fstab", "w") as fst:
         fst.write(f"{mount_point}  /  ext4  errors=remount-ro  0  1\n")
 
-    log("6. Установка GRUB...", "\033[96m")
-    # --boot-directory это современная замена --root-directory
-    if not run_cmd(["grub-install", "--boot-directory=/mnt/boot", disk]): 
-        log("[-] Ошибка установки загрузчика GRUB!", "\033[91m")
+    log("6. Установка GRUB (через chroot)...", "\033[96m")
+    
+    # Для правильной работы grub-install внутри chroot ему нужны системные директории
+    run_cmd(["mount", "--bind", "/dev", "/mnt/dev"])
+    run_cmd(["mount", "--bind", "/proc", "/mnt/proc"])
+    run_cmd(["mount", "--bind", "/sys", "/mnt/sys"])
+    run_cmd(["mount", "--bind", "/run", "/mnt/run"])
+
+    # Запускаем grub-install прямо "изнутри" будущей системы
+    chroot_grub = f"chroot /mnt grub-install {disk}"
+    if not run_cmd(["bash", "-c", chroot_grub]):
+        log("[-] Ошибка установки загрузчика GRUB в MBR!", "\033[91m")
+        # Не забываем отмонтировать шины перед выходом при ошибке
+        for p in ["/run", "/sys", "/proc", "/dev"]: run_cmd(["umount", f"/mnt{p}"])
         return False
+        
+    # Отмонтируем системные шины обратно
+    for p in ["/run", "/sys", "/proc", "/dev"]: 
+        run_cmd(["umount", "-l", f"/mnt{p}"])
     
     log("7. Генерация grub.cfg...", "\033[96m")
     os.makedirs("/mnt/boot/grub", exist_ok=True)
