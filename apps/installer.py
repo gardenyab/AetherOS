@@ -60,29 +60,30 @@ class Installler:
         ]
         if not self._run_cmd(rsync_cmd): return False
 
-        self._log("4.5. Извлечение ядра и initrd с CD-ROM...", "\033[96m")
-        os.makedirs("/tmp/cdrom", exist_ok=True)
+        self._log("4.5. Копирование ядра и initrd из Live-окружения...", "\033[96m")
         os.makedirs("/mnt/boot", exist_ok=True)
         
-        cd_mounted = False
-        for cd_dev in ["/dev/sr0", "/dev/cdrom"]:
-            subprocess.run(["umount", "-l", "/tmp/cdrom"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-            if self._run_cmd(["mount", "-o", "ro", cd_dev, "/tmp/cdrom"]):
-                cd_mounted = True
-                break
-                
-        if cd_mounted:
-            import glob
-            cd_kernels = glob.glob("/tmp/cdrom/boot/vmlinuz*") + glob.glob("/tmp/cdrom/live/vmlinuz*")
-            cd_initrds = glob.glob("/tmp/cdrom/boot/initrd*") + glob.glob("/tmp/cdrom/live/initrd*")
-            
-            if cd_kernels:
-                self._log(f"[+] Найдено ядро на CD: {cd_kernels[0]}", "\033[92m")
-                self._run_cmd(["cp", "-v", cd_kernels[0], "/mnt/boot/vmlinuz-6.12.94+deb13-amd64"])
-            if cd_initrds:
-                self._log(f"[+] Найден initrd на CD: {cd_initrds[0]}", "\033[92m")
-                self._run_cmd(["cp", "-v", cd_initrds[0], "/mnt/boot/initrd.img-6.12.94+deb13-amd64"])
-            self._run_cmd(["umount", "/tmp/cdrom"])
+        # Путь, куда система сама примонтировала наш ISO
+        live_iso_path = "/run/initramfs/memory/data/linux/boot"
+        
+        import glob
+        # Ищем файлы прямо в системной точке монтирования ISO
+        iso_kernels = glob.glob(f"{live_iso_path}/vmlinuz*")
+        iso_initrds = glob.glob(f"{live_iso_path}/initrd*")
+        
+        if iso_kernels:
+            self._log(f"[+] Найдено ядро на ISO: {iso_kernels[0]}", "\033[92m")
+            self._run_cmd(["cp", "-v", iso_kernels[0], "/mnt/boot/vmlinuz-6.12.94+deb13-amd64"])
+        else:
+            self._log("[-] Ядро на ISO не найдено! Пробуем скопировать из RAM...", "\033[93m")
+            self._run_cmd(["cp", "-v", "/boot/vmlinuz-6.12.94+deb13-amd64", "/mnt/boot/"])
+
+        if iso_initrds:
+            self._log(f"[+] Найден initrd на ISO: {iso_initrds[0]}", "\033[92m")
+            self._run_cmd(["cp", "-v", iso_initrds[0], "/mnt/boot/initrd.img-6.12.94+deb13-amd64"])
+        else:
+            self._log("[-] Initrd на ISO не найден! Пробуем скопировать из RAM...", "\033[93m")
+            self._run_cmd(["cp", "-v", "/boot/initrd.img-6.12.94+deb13-amd64", "/mnt/boot/"])
 
         self._log("5. Подготовка fstab...", "\033[96m")
         try:
