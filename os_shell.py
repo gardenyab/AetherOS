@@ -3,7 +3,9 @@ import subprocess
 import shutil
 import sys
 import inspect
+import ast
 import importlib
+import importlib.util
 import urllib.request
 import readline
 
@@ -113,7 +115,7 @@ def download_app(url):
 
     except Exception as e:
         print(f"[-] Не удалось скачать файл: {e}")
-        
+
 def delete_app(app_name):
     """Удаляет приложение из папки ./apps/"""
     if not app_name:
