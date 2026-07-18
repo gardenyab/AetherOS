@@ -1,5 +1,6 @@
 import urllib
 import json
+import core
 
 class AppStore:
     """Apps manager"""
@@ -25,5 +26,14 @@ class AppStore:
                 text.append(f"•. {i} - {self.data[i]['version']}.\n    {self.data[i]['description']}")
             messageText = "\n".join(text)
             print(messageText)
+        except Exception as e:
+            print(str(e))
+    
+    def install_app(self, args):
+        """install app by their name"""
+        try:
+            self._getAppsList(self.appsListUrl)
+            if " ".join(args) not in self.data: print("Unknown app")
+            else: core.downloadApp(self.data[" ".join(args)]["url"])
         except Exception as e:
             print(str(e))
