@@ -43,7 +43,7 @@ def show_menu():
         free_space = shutil.disk_usage('/').free // (1024**2)
         
         print("================================")
-        print("      WELCOME AETHER OS         ")
+        print("      WELCOME AETHER OS v3        ")
         print("================================")
         print(f"  RAM/DISK (approx): {free_space} MB")
         print("--------------------------------")
