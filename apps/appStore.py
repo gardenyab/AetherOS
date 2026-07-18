@@ -6,9 +6,7 @@ class AppStore:
     
     requirements = []
     requirementsApt = []
-
-    def __init__(self):
-        self.appsListUrl = "https://raw.githubusercontent.com/gardenyab/AetherOSAppsRepo/refs/heads/main/apps.json" 
+    appsListUrl = "https://raw.githubusercontent.com/gardenyab/AetherOSAppsRepo/refs/heads/main/apps.json" 
     
     def _getAppsList(self, url):
         try:
@@ -19,6 +17,7 @@ class AppStore:
             self.data = {} 
     
     def show_apps(self):
+        """ok"""
         try:
             self._getAppsList(self.appsListUrl)
             text = []
