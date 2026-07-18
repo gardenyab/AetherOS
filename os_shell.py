@@ -205,17 +205,55 @@ def install_system_to_disk():
         except Exception:
             pass
 
-        # Принудительно ставим пакет бинарников GRUB UEFI внутрь устанавливаемой системы
-        print("[!] Доустановка EFI-компонентов GRUB в целевую систему...")
+        # Принудительно ставим пакет бинарников GRUB UEFI и os-prober внутрь устанавливаемой системы
+        print("[!] Доустановка EFI-компонентов GRUB и os-prober в целевую систему...")
         try:
             subprocess.run(["chroot", mount_dir, "apt", "update"], check=True, env=env)
-            subprocess.run(["chroot", mount_dir, "apt", "install", "-y", "grub-efi-amd64-bin", "grub-efi"], check=True, env=env)
+            subprocess.run(["chroot", mount_dir, "apt", "install", "-y", "grub-efi-amd64-bin", "grub-efi", "os-prober"], check=True, env=env)
         except Exception as e:
             print(f"[!] Предупреждение при обновлении пакетов в chroot: {e}. Пробуем продолжить...")
 
+        # Генерируем базовый fstab, чтобы система знала, откуда монтировать корень при старте
+        print("[!] Генерация конфигурации fstab...")
+        try:
+            fstab_path = f"{mount_dir}/etc/fstab"
+            with open(fstab_path, "w") as fstab:
+                fstab.write(f"{p2} / ext4 defaults,noatime 0 1\n")
+                fstab.write(f"{p1} /boot/efi vfat defaults 0 2\n")
+        except Exception as e:
+            print(f"[-] Не удалось сгенерировать fstab: {e}")
+
+        # Принудительно разрешаем GRUB искать ядра Linux на диске
+        print("[!] Настройка конфигурации GRUB...")
+        try:
+            # Проверяем, существует ли файл, если нет — создаем базовый вариант
+            grub_default = f"{mount_dir}/etc/default/grub"
+            if not os.path.exists(grub_default):
+                os.makedirs(os.path.dirname(grub_default), exist_ok=True)
+                with open(grub_default, "w") as gd:
+                    gd.write('GRUB_DEFAULT=0\nGRUB_TIMEOUT=5\nGRUB_DISTRIBUTOR="AetherOS"\nGRUB_CMDLINE_LINUX_DEFAULT="quiet splash"\n')
+            
+            # Дописываем разрешение для os-prober
+            subprocess.run(["chroot", mount_dir, "bash", "-c", "echo 'GRUB_DISABLE_OS_PROBER=false' >> /etc/default/grub"], check=True, env=env)
+        except Exception as e:
+            print(f"[-] Предупреждение при настройке /etc/default/grub: {e}")
+
         # Ставим GRUB и генерируем конфиг изнутри chroot окружения нового диска
-        subprocess.run(["chroot", mount_dir, "grub-install", "--target=x86_64-efi", "--efi-directory=/boot/efi", "--bootloader-id=AetherOS", "--removable"], check=True, env=env)
-        subprocess.run(["chroot", mount_dir, "grub-mkconfig", "-o", "/boot/grub/grub.cfg"], check=True, env=env)
+        print("[!] Запись UEFI загрузчика (Removable Path)...")
+        subprocess.run([
+            "chroot", mount_dir, "grub-install", 
+            "--target=x86_64-efi", 
+            "--efi-directory=/boot/efi", 
+            "--bootloader-id=AetherOS", 
+            "--removable"
+        ], check=True, env=env)
+        
+        print("[!] Генерация конфигурационного файла grub.cfg...")
+        # update-grub автоматически вызывает grub-mkconfig с правильными путями в Debian/Ubuntu
+        try:
+            subprocess.run(["chroot", mount_dir, "update-grub"], check=True, env=env)
+        except Exception:
+            subprocess.run(["chroot", mount_dir, "grub-mkconfig", "-o", "/boot/grub/grub.cfg"], check=True, env=env)
 
         print("\n[!] Завершение работы с диском и размонтирование разделов...")
         # Размонтируем виртуальные папки
@@ -243,6 +281,7 @@ def install_system_to_disk():
         try: subprocess.run(["umount", mount_dir], env=env, capture_output=True)
         except Exception: pass
         print("[!] Очистка завершена. Проверьте логи.")
+
 def show_help():
     """Автоматический генератор справки по системе и модулям"""
     load_apps()
