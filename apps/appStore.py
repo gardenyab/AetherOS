@@ -21,8 +21,8 @@ class AppStore:
         try:
             self._getAppsList(self.appsListUrl)
             text = []
-            for i in self.data:
-                text.append(f"•. {i} - {self.data['i']['version']}.\n    {self.data['i']['description']}")
+            for i in self.data.keys():
+                text.append(f"•. {i} - {self.data[i]['version']}.\n    {self.data[i]['description']}")
             messageText = "\n".join(text)
             print(messageText)
         except Exception as e:
