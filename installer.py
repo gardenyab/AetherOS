@@ -69,12 +69,15 @@ def do_install(disk="/dev/sda"):
     log("7. Генерация grub.cfg...", "\033[96m")
     os.makedirs("/mnt/boot/grub", exist_ok=True)
     
-    # Динамический поиск ядра (зависит от того, как собирался Live Kit)
-    kernel_path = "/vmlinuz"
-    initrd_path = "/initrd.img"
+    import glob
     
-    if os.path.exists("/mnt/boot/vmlinuz"): kernel_path = "/boot/vmlinuz"
-    if os.path.exists("/mnt/boot/initrd.img"): initrd_path = "/boot/initrd.img"
+    # Динамический поиск файлов ядра и initrd
+    vmlinuz_files = glob.glob("/mnt/boot/vmlinuz-*")
+    initrd_files = glob.glob("/mnt/boot/initrd.img-*")
+    
+    # Если файлы найдены, отрезаем префикс /mnt, чтобы путь был правильным для GRUB
+    kernel_path = vmlinuz_files[0].replace("/mnt", "") if vmlinuz_files else "/boot/vmlinuz"
+    initrd_path = initrd_files[0].replace("/mnt", "") if initrd_files else "/boot/initrd.img"
 
     with open("/mnt/boot/grub/grub.cfg", "w") as f:
         f.write("set timeout=3\n")
