@@ -5,9 +5,8 @@ import sys
 import inspect
 import importlib
 import urllib.request
-import readline  # Библиотека для истории, стрелочек и автодополнения
+import readline
 
-# Список динамически загруженных экземпляров классов-приложений
 MODULES = []
 
 def load_apps():
@@ -93,6 +92,90 @@ def delete_app(app_name):
     except Exception as e:
         print(f"[-] Не удалось удалить файл: {e}")
 
+def install_system_to_disk():
+    """Инсталлятор Aether OS на жесткий диск/SSD"""
+    print("\n====================================================")
+    print("       AETHER OS — МАСТЕР УСТАНОВКИ НА ДИСК")
+    print("====================================================")
+    
+    if os.getuid() != 0:
+        print("[-] Ошибка: Для установки системы требуются права root (sudo)!")
+        return
+
+    # 1. Показываем доступные диски
+    print("[!] Доступные накопители в системе:")
+    try:
+        subprocess.run(["lsblk", "-d", "-o", "NAME,SIZE,MODEL,TYPE"], check=True)
+    except Exception:
+        print("[-] Не удалось получить список дисков через lsblk.")
+        return
+
+    drive = input("\nВведите имя диска для установки (например, sda или nvme0n1): ").strip()
+    if not drive:
+        print("[-] Отменено.")
+        return
+
+    target_disk = f"/dev/{drive}"
+    if not os.path.exists(target_disk):
+        print(f"[-] Ошибка: Диск {target_disk} не найден!")
+        return
+
+    confirm = input(f"⚠️ ВНИМАНИЕ! Все данные на {target_disk} БУДУТ УНИЧТОЖЕНЫ! Продолжить? (y/N): ").strip().lower()
+    if confirm != 'y':
+        print("[-] Установка отменена.")
+        return
+
+    try:
+        print(f"\n[1/5] Очистка и разметка диска {target_disk} (GPT)...")
+        # Создаем таблицу GPT и два раздела: EFI (512M) и ROOT (все оставшееся пространство)
+        subprocess.run(["parted", "-s", target_disk, "mklabel", "gpt"], check=True)
+        subprocess.run(["parted", "-s", target_disk, "mkpart", "ESP", "fat32", "1MiB", "513MiB"], check=True)
+        subprocess.run(["parted", "-s", target_disk, "set", "1", "esp", "on"], check=True)
+        subprocess.run(["parted", "-s", target_disk, "mkpart", "root", "ext4", "513MiB", "100%"], check=True)
+
+        # Проверяем структуру именования (для NVMe разделы идут как p1, p2, для SATA как 1, 2)
+        p1 = f"{target_disk}p1" if "nvme" in target_disk else f"{target_disk}1"
+        p2 = f"{target_disk}p2" if "nvme" in target_disk else f"{target_disk}2"
+
+        print("\n[2/5] Форматирование разделов...")
+        subprocess.run(["mkfs.vfat", "-F", "32", p1], check=True)
+        subprocess.run(["mkfs.ext4", "-F", p2], check=True)
+
+        print("\n[3/5] Монтирование новой файловой системы...")
+        mount_dir = "/mnt/target_aether"
+        os.makedirs(mount_dir, exist_ok=True)
+        subprocess.run(["mount", p2, mount_dir], check=True)
+        
+        boot_efi_dir = os.path.join(mount_dir, "boot/efi")
+        os.makedirs(boot_efi_dir, exist_ok=True)
+        subprocess.run(["mount", p1, boot_efi_dir], check=True)
+
+        print("\n[4/5] Копирование системных файлов (это может занять время)...")
+        # Копируем корень текущей Live-системы, исключая виртуальные и временные папки
+        subprocess.run([
+            "rsync", "-aHAXx", "--info=progress2",
+            "--exclude=/proc/*", "--exclude=/sys/*", "--exclude=/dev/*", 
+            "--exclude=/run/*", "--exclude=/tmp/*", "--exclude=/mnt/*", 
+            "/", mount_dir
+        ], check=True)
+
+        print("\n[5/5] Установка и настройка загрузчика GRUB...")
+        # Устанавливаем GRUB внутри изолированного окружения chroot
+        subprocess.run(["grub-install", f"--target=x86_64-efi", f"--efi-directory={boot_efi_dir}", f"--bootloader-id=AetherOS", f"--root-directory={mount_dir}"], check=True)
+        
+        # Генерируем конфигурацию GRUB
+        subprocess.run(["chroot", mount_dir, "grub-mkconfig", "-o", "/boot/grub/grub.cfg"], check=True)
+
+        # Размонтируем все обратно
+        print("\n[!] Завершение работы с диском...")
+        subprocess.run(["umount", boot_efi_dir], check=True)
+        subprocess.run(["umount", mount_dir], check=True)
+
+        print("\n[+] УСТАНОВКА ЗАВЕРШЕНА УСПЕШНО!")
+        print("[!] Теперь вы можете вытащить флешку и перезагрузить ПК.")
+    except Exception as e:
+        print(f"\n[-] Ошибка в процессе установки системы: {e}")
+
 def show_help():
     """Автоматический генератор справки по системе и модулям"""
     load_apps()
@@ -100,13 +183,14 @@ def show_help():
     print("\n      AETHER OS v1 — СПРАВКА ПО КОМАНДАМ")
     print("====================================================")
     print("📦 Встроенные системные команды:")
-    print("  ↳ install <url> - Скачать и установить .py модуль по ссылке")
+    print("  ↳ install-system   - Установить Aether OS с Live-ISO на жесткий диск")
+    print("  ↳ install <url>    - Скачать и установить .py модуль по ссылке")
     print("  ↳ uninstall <name> - Удалить установленный модуль")
-    print("  ↳ update       - Проверить и установить обновления из Git")
-    print("  ↳ shutdown     - Выключить ПК")
-    print("  ↳ help         - Показать эту справку")
-    print("  ↳ clear        - Очистить экран")
-    print("  ↳ exit / q     - Выйти из оболочки")
+    print("  ↳ update           - Проверить и установить обновления из Git")
+    print("  ↳ shutdown         - Выключить ПК")
+    print("  ↳ help             - Показать эту справку")
+    print("  ↳ clear            - Очистить экран")
+    print("  ↳ exit / q         - Выйти из оболочки")
     
     if not MODULES:
         print("\n📦 Модули в ./apps/ не обнаружены.")
@@ -156,7 +240,7 @@ def start_shell():
     
     # Функция автодополнения по Tab
     def completer(text, state):
-        builtins = ['help', 'clear', 'install', 'uninstall', 'update', 'shutdown', 'exit', 'q']
+        builtins = ['help', 'clear', 'install', 'uninstall', 'install-system', 'update', 'shutdown', 'exit', 'q']
         app_cmds = []
         for module in MODULES:
             app_cmds.extend([name for name, _ in inspect.getmembers(module, inspect.ismethod) if not name.startswith('_')])
@@ -174,11 +258,10 @@ def start_shell():
     free_space = shutil.disk_usage('/').free // (1024**2)
     
     print("AetherOS v1")
-    print("~ Commands: help, clear, install, update, uninstall, shutdown")
+    print("~ Commands: help, clear, install, install-system, update, uninstall, shutdown")
     
     while True:
         try:
-            # Исправлено: теперь строка приглашения выводится корректно внутри input
             user_input = input("AetherOS ~ ").strip()
             if not user_input:
                 continue
@@ -200,6 +283,9 @@ def start_shell():
             elif cmd == 'uninstall':
                 app_arg = args[0] if args else None
                 delete_app(app_arg)
+                continue
+            elif cmd == 'install-system':
+                install_system_to_disk()
                 continue
             elif cmd == 'update':
                 update_system()
