@@ -31,7 +31,7 @@ def do_install():
     if not run_cmd(["parted", "-s", disk, "set", "1", "boot", "on"]): return False
 
     log("2. Форматирование...", "\033[96m")
-    if not run_cmd(["mkfs.ext4", "-F", "-F", part]): return False
+    if not run_cmd(["mkfs.ext4", "-F", "-F", part]):pass
 
     log("3. Монтирование...", "\033[96m")
     os.makedirs("/mnt", exist_ok=True)
