@@ -214,7 +214,7 @@ def install_system_to_disk():
             print(f"[!] Предупреждение при обновлении пакетов в chroot: {e}. Пробуем продолжить...")
 
         # Ставим GRUB и генерируем конфиг изнутри chroot окружения нового диска
-        subprocess.run(["chroot", mount_dir, "grub-install", "--target=x86_64-efi", "--efi-directory=/boot/efi", "--bootloader-id=AetherOS"], check=True, env=env)
+        subprocess.run(["chroot", mount_dir, "grub-install", "--target=x86_64-efi", "--efi-directory=/boot/efi", "--bootloader-id=AetherOS", "--removable"], check=True, env=env)
         subprocess.run(["chroot", mount_dir, "grub-mkconfig", "-o", "/boot/grub/grub.cfg"], check=True, env=env)
 
         print("\n[!] Завершение работы с диском и размонтирование разделов...")
