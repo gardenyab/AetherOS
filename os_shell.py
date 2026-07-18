@@ -93,7 +93,7 @@ def delete_app(app_name):
         print(f"[-] Не удалось удалить файл: {e}")
 
 def install_system_to_disk():
-    """Инсталлятор Aether OS на жесткий диск/SSD с автоматической настройкой окружения и UEFI"""
+    """Инсталлятор Aether OS на жесткий диск/SSD с автоматической установкой зависимостей и UEFI"""
     print("\n====================================================")
     print("       AETHER OS — МАСТЕР УСТАНОВКИ НА ДИСК")
     print("====================================================")
@@ -111,18 +111,23 @@ def install_system_to_disk():
             current_path = f"{path}:{current_path}" if current_path else path
     env["PATH"] = current_path
 
-    # Проверка наличия обязательного софта на Live-ISO перед началом разметки
+    # Автоматическая проверка и доустановка утилит в самом Live-ISO хосте
+    print("[!] Проверка базовых зависимостей в Live-системе...")
     required_tools = ["parted", "mkfs.vfat", "mkfs.ext4", "rsync", "grub-install"]
     missing_tools = [tool for tool in required_tools if not shutil.which(tool, path=current_path)]
     
     if missing_tools:
-        print(f"[-] Ошибка: В системе отсутствуют необходимые утилиты: {', '.join(missing_tools)}")
-        print("[!] Перед установкой выполните в терминале (для Debian/Ubuntu):")
-        print("    apt update && apt install e2fsprogs dosfstools rsync -y")
-        return
+        print(f"[!] В Live-ISO не найдены: {', '.join(missing_tools)}. Устанавливаем зависимости...")
+        try:
+            subprocess.run(["apt", "update"], check=True, env=env)
+            subprocess.run(["apt", "install", "-y", "parted", "e2fsprogs", "dosfstools", "rsync", "grub-efi-amd64-bin"], check=True, env=env)
+            print("[+] Базовые зависимости хоста успешно установлены.")
+        except Exception as e:
+            print(f"[-] Не удалось установить утилиты хоста автоматически: {e}")
+            return
 
     # 1. Вывод списка накопителей
-    print("[!] Доступные накопители в системе:")
+    print("\n[!] Доступные накопители в системе:")
     try:
         subprocess.run(["lsblk", "-d", "-o", "NAME,SIZE,MODEL,TYPE"], check=True, env=env)
     except Exception:
@@ -149,18 +154,17 @@ def install_system_to_disk():
     vfs_mounted = []
 
     try:
-        print(f"[!] Подготовка диска {target_disk} (отмонтирование активных разделов)...")
+        print(f"\n[!] Подготовка диска {target_disk} (отмонтирование активных разделов)...")
         try:
-            # Ищем в /proc/mounts любые упоминания разделов этого диска и размонтируем их
             with open("/proc/mounts", "r") as f:
                 for line in f:
                     if target_disk in line:
                         mount_point = line.split()[1]
                         subprocess.run(["umount", "-l", mount_point], env=env, capture_output=True)
-            # На всякий случай гасим swap, если он был на этом диске
             subprocess.run(["swapoff", "-a"], env=env, capture_output=True)
         except Exception:
             pass
+
         print(f"\n[1/5] Очистка и разметка диска {target_disk} (GPT)...")
         subprocess.run(["parted", "-s", target_disk, "mklabel", "gpt"], check=True, env=env)
         subprocess.run(["parted", "-s", target_disk, "mkpart", "ESP", "fat32", "1MiB", "513MiB"], check=True, env=env)
@@ -190,10 +194,24 @@ def install_system_to_disk():
         ], check=True, env=env)
 
         print("\n[5/5] Установка и настройка загрузчика GRUB...")
-        # Монтируем виртуальные директории API ядра, необходимые для генерации GRUB и работы с NVRAM
+        # Монтируем виртуальные директории API ядра, необходимые для chroot, интернета и работы с NVRAM материнки
         for vfs in ["dev", "proc", "sys", "run"]:
             subprocess.run(["mount", "--bind", f"/{vfs}", f"{mount_dir}/{vfs}"], check=True, env=env)
             vfs_mounted.append(vfs)
+
+        # Копируем DNS-настройки, чтобы внутри chroot работал интернет для установки пакетов
+        try:
+            shutil.copyfile("/etc/resolv.conf", f"{mount_dir}/etc/resolv.conf")
+        except Exception:
+            pass
+
+        # Принудительно ставим пакет бинарников GRUB UEFI внутрь устанавливаемой системы
+        print("[!] Доустановка EFI-компонентов GRUB в целевую систему...")
+        try:
+            subprocess.run(["chroot", mount_dir, "apt", "update"], check=True, env=env)
+            subprocess.run(["chroot", mount_dir, "apt", "install", "-y", "grub-efi-amd64-bin", "grub-efi"], check=True, env=env)
+        except Exception as e:
+            print(f"[!] Предупреждение при обновлении пакетов в chroot: {e}. Пробуем продолжить...")
 
         # Ставим GRUB и генерируем конфиг изнутри chroot окружения нового диска
         subprocess.run(["chroot", mount_dir, "grub-install", "--target=x86_64-efi", "--efi-directory=/boot/efi", "--bootloader-id=AetherOS"], check=True, env=env)
@@ -225,7 +243,6 @@ def install_system_to_disk():
         try: subprocess.run(["umount", mount_dir], env=env, capture_output=True)
         except Exception: pass
         print("[!] Очистка завершена. Проверьте логи.")
-
 def show_help():
     """Автоматический генератор справки по системе и модулям"""
     load_apps()
