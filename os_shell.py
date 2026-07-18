@@ -16,7 +16,7 @@ def update_system():
                        check=True, capture_output=True)
         
         local = subprocess.check_output(["git", "-C", project_path, "rev-parse", "HEAD"]).decode().strip()
-        remote = subprocess.check_output(["git", "-C", project_path, "rev-parse", "origin/master"]).decode().strip()
+        remote = subprocess.check_output(["git", "-C", project_path, "rev-parse", "origin/main"]).decode().strip()
         
         if local == remote:
             print("[+] System is already up to date.")
@@ -24,7 +24,7 @@ def update_system():
 
         print("[!] Updates found. Applying...")
 
-        subprocess.run(["git", "-C", project_path, "reset", "--hard"], check=True)
+        subprocess.run(["git", "-C", project_path, "reset", "--hard", "origin/main"], check=True)
         
         print("[+] System updated successfully!")
         print("[!] Restarting shell to apply changes...")
@@ -63,6 +63,10 @@ def show_menu():
         elif choice == '2':
             print("\nShutting down...")
             subprocess.run(["poweroff"])
+        
+        elif choice == '3':
+            update_system()
+            input("\nPress Enter to return to menu...")
             
         elif choice == 'q':
             print("Exiting shell...")
