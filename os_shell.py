@@ -234,7 +234,7 @@ def start_shell():
     
     while True:
         try:
-            user_input = input("AetherOS ~ ").strip()
+            user_input = input("user@AetherOS # ").strip()
             if not user_input: continue
                 
             parts = user_input.split()
