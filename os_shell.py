@@ -122,195 +122,99 @@ def delete_app(app_name):
     except Exception as e:
         print(f"[-] Не удалось удалить файл: {e}")
 
-def install_system_to_disk():
-    """Инсталлятор Aether OS на жесткий диск/SSD с автоматической установкой зависимостей и UEFI"""
-    print("\n====================================================")
-    print("       AETHER OS — МАСТЕР УСТАНОВКИ НА ДИСК")
-    print("====================================================")
-    
-    if os.getuid() != 0:
-        print("[-] Ошибка: Для установки системы требуются права root (sudo)!")
-        return
+def do_install(disk="/dev/sda"):
+    print("=== НАЧАЛО УСТАНОВКИ (LEGACY/MBR) ===", "\033[93m")
+    part = f"{disk}1"
 
-    # Настройка правильного PATH для поиска админских утилит (mkfs, parted)
-    env = os.environ.copy()
-    additional_paths = ["/sbin", "/usr/sbin", "/usr/local/sbin"]
-    current_path = env.get("PATH", "")
-    for path in additional_paths:
-        if path not in current_path:
-            current_path = f"{path}:{current_path}" if current_path else path
-    env["PATH"] = current_path
+    if not os.path.exists(disk):
+        print(f"[-] Ошибка: Диск {disk} не найден!", "\033[91m")
+        return False
 
-    # Автоматическая проверка и доустановка утилит в самом Live-ISO хосте
-    print("[!] Проверка базовых зависимостей в Live-системе...")
-    required_tools = ["parted", "mkfs.vfat", "mkfs.ext4", "rsync", "grub-install"]
-    missing_tools = [tool for tool in required_tools if not shutil.which(tool, path=current_path)]
-    
-    if missing_tools:
-        print(f"[!] В Live-ISO не найдены: {', '.join(missing_tools)}. Устанавливаем зависимости...")
-        try:
-            subprocess.run(["apt", "update"], check=True, env=env)
-            subprocess.run(["apt", "install", "-y", "parted", "e2fsprogs", "dosfstools", "rsync", "grub-efi-amd64-bin"], check=True, env=env)
-            print("[+] Базовые зависимости хоста успешно установлены.")
-        except Exception as e:
-            print(f"[-] Не удалось установить утилиты хоста автоматически: {e}")
-            return
+    print("1. Разметка диска (MBR)...", "\033[96m")
+    if not run_cmd(["parted", "-s", disk, "mklabel", "msdos"]): return False
+    if not run_cmd(["parted", "-s", disk, "mkpart", "primary", "ext4", "1MiB", "100%"]): return False
+    if not run_cmd(["parted", "-s", disk, "set", "1", "boot", "on"]): return False
 
-    # 1. Вывод списка накопителей
-    print("\n[!] Доступные накопители в системе:")
+    print("2. Форматирование в ext4...", "\033[96m")
+    if not run_cmd(["mkfs.ext4", "-F", part]):
+        print("[-] Ошибка форматирования!", "\033[91m")
+        return False
+
+    print("3. Монтирование...", "\033[96m")
+    os.makedirs("/mnt", exist_ok=True)
+    run_cmd(["umount", "-q", "/mnt"]) # На всякий случай отмонтируем, если что-то зависло
+    if not run_cmd(["mount", part, "/mnt"]): return False
+
+    print("4. Копирование файлов (rsync)...", "\033[96m")
+    rsync_cmd = [
+        "rsync", "-aHAXx", 
+        "--exclude=/proc/*", "--exclude=/sys/*", 
+        "--exclude=/dev/*", "--exclude=/mnt/*", 
+        "--exclude=/tmp/*", "--exclude=/run/*", 
+        "/", "/mnt/"
+    ]
+    if not run_cmd(rsync_cmd): return False
+
+    print("5. Подготовка fstab...", "\033[96m")
+    # Пытаемся получить UUID для надежной загрузки, если не выйдет — используем part
     try:
-        subprocess.run(["lsblk", "-d", "-o", "NAME,SIZE,MODEL,TYPE"], check=True, env=env)
+        uuid = subprocess.check_output(["blkid", "-s", "UUID", "-o", "value", part]).decode().strip()
+        mount_point = f"UUID={uuid}"
     except Exception:
-        print("[-] Не удалось получить список дисков через lsblk.")
-        return
+        mount_point = part
 
-    drive = input("\nВведите имя диска для установки (например, sda или nvme0n1): ").strip()
-    if not drive:
-        print("[-] Отменено.")
-        return
+    with open("/mnt/etc/fstab", "w") as fst:
+        fst.write(f"{mount_point}  /  ext4  errors=remount-ro  0  1\n")
 
-    target_disk = f"/dev/{drive}"
-    if not os.path.exists(target_disk):
-        print(f"[-] Ошибка: Диск {target_disk} не найден!")
-        return
+    print("6. Установка GRUB (через chroot)...", "\033[96m")
+    
+    # Для правильной работы grub-install внутри chroot ему нужны системные директории
+    run_cmd(["mount", "--bind", "/dev", "/mnt/dev"])
+    run_cmd(["mount", "--bind", "/proc", "/mnt/proc"])
+    run_cmd(["mount", "--bind", "/sys", "/mnt/sys"])
+    run_cmd(["mount", "--bind", "/run", "/mnt/run"])
 
-    confirm = input(f"⚠️ ВНИМАНИЕ! Все данные на {target_disk} БУДУТ УНИЧТОЖЕНЫ! Продолжить? (y/N): ").strip().lower()
-    if confirm != 'y':
-        print("[-] Установка отменена.")
-        return
-
-    mount_dir = "/mnt/target_aether"
-    boot_efi_dir = os.path.join(mount_dir, "boot/efi")
-    vfs_mounted = []
-
-    try:
-        print(f"\n[!] Подготовка диска {target_disk} (отмонтирование активных разделов)...")
-        try:
-            with open("/proc/mounts", "r") as f:
-                for line in f:
-                    if target_disk in line:
-                        mount_point = line.split()[1]
-                        subprocess.run(["umount", "-l", mount_point], env=env, capture_output=True)
-            subprocess.run(["swapoff", "-a"], env=env, capture_output=True)
-        except Exception:
-            pass
-
-        print(f"\n[1/5] Очистка и разметка диска {target_disk} (GPT)...")
-        subprocess.run(["parted", "-s", target_disk, "mklabel", "gpt"], check=True, env=env)
-        subprocess.run(["parted", "-s", target_disk, "mkpart", "ESP", "fat32", "1MiB", "513MiB"], check=True, env=env)
-        subprocess.run(["parted", "-s", target_disk, "set", "1", "esp", "on"], check=True, env=env)
-        subprocess.run(["parted", "-s", target_disk, "mkpart", "root", "ext4", "513MiB", "100%"], check=True, env=env)
-
-        # Определение разметки NVMe (p1, p2) или SATA (1, 2)
-        p1 = f"{target_disk}p1" if "nvme" in target_disk else f"{target_disk}1"
-        p2 = f"{target_disk}p2" if "nvme" in target_disk else f"{target_disk}2"
-
-        print("\n[2/5] Форматирование разделов...")
-        subprocess.run(["mkfs.vfat", "-F", "32", p1], check=True, env=env)
-        subprocess.run(["mkfs.ext4", "-F", p2], check=True, env=env)
-
-        print("\n[3/5] Монтирование новой файловой системы...")
-        os.makedirs(mount_dir, exist_ok=True)
-        subprocess.run(["mount", p2, mount_dir], check=True, env=env)
-        os.makedirs(boot_efi_dir, exist_ok=True)
-        subprocess.run(["mount", p1, boot_efi_dir], check=True, env=env)
-
-        print("\n[4/5] Копирование системных файлов (это может занять время)...")
-        subprocess.run([
-            "rsync", "-aHAXx", "--info=progress2",
-            "--exclude=/proc/*", "--exclude=/sys/*", "--exclude=/dev/*", 
-            "--exclude=/run/*", "--exclude=/tmp/*", "--exclude=/mnt/*", 
-            "/", mount_dir
-        ], check=True, env=env)
-
-        print("\n[5/5] Установка и настройка загрузчика GRUB...")
-        # Монтируем виртуальные директории API ядра, необходимые для chroot, интернета и работы с NVRAM материнки
-        for vfs in ["dev", "proc", "sys", "run"]:
-            subprocess.run(["mount", "--bind", f"/{vfs}", f"{mount_dir}/{vfs}"], check=True, env=env)
-            vfs_mounted.append(vfs)
-
-        # Копируем DNS-настройки, чтобы внутри chroot работал интернет для установки пакетов
-        try:
-            shutil.copyfile("/etc/resolv.conf", f"{mount_dir}/etc/resolv.conf")
-        except Exception:
-            pass
-
-        # Принудительно ставим пакет бинарников GRUB UEFI и os-prober внутрь устанавливаемой системы
-        print("[!] Доустановка EFI-компонентов GRUB и os-prober в целевую систему...")
-        try:
-            subprocess.run(["chroot", mount_dir, "apt", "update"], check=True, env=env)
-            subprocess.run(["chroot", mount_dir, "apt", "install", "-y", "grub-efi-amd64-bin", "grub-efi", "os-prober"], check=True, env=env)
-        except Exception as e:
-            print(f"[!] Предупреждение при обновлении пакетов в chroot: {e}. Пробуем продолжить...")
-
-        # Генерируем базовый fstab, чтобы система знала, откуда монтировать корень при старте
-        print("[!] Генерация конфигурации fstab...")
-        try:
-            fstab_path = f"{mount_dir}/etc/fstab"
-            with open(fstab_path, "w") as fstab:
-                fstab.write(f"{p2} / ext4 defaults,noatime 0 1\n")
-                fstab.write(f"{p1} /boot/efi vfat defaults 0 2\n")
-        except Exception as e:
-            print(f"[-] Не удалось сгенерировать fstab: {e}")
-
-        # Принудительно разрешаем GRUB искать ядра Linux на диске
-        print("[!] Настройка конфигурации GRUB...")
-        try:
-            # Проверяем, существует ли файл, если нет — создаем базовый вариант
-            grub_default = f"{mount_dir}/etc/default/grub"
-            if not os.path.exists(grub_default):
-                os.makedirs(os.path.dirname(grub_default), exist_ok=True)
-                with open(grub_default, "w") as gd:
-                    gd.write('GRUB_DEFAULT=0\nGRUB_TIMEOUT=5\nGRUB_DISTRIBUTOR="AetherOS"\nGRUB_CMDLINE_LINUX_DEFAULT="quiet splash"\n')
-            
-            # Дописываем разрешение для os-prober
-            subprocess.run(["chroot", mount_dir, "bash", "-c", "echo 'GRUB_DISABLE_OS_PROBER=false' >> /etc/default/grub"], check=True, env=env)
-        except Exception as e:
-            print(f"[-] Предупреждение при настройке /etc/default/grub: {e}")
-
-        # Ставим GRUB и генерируем конфиг изнутри chroot окружения нового диска
-        print("[!] Запись UEFI загрузчика (Removable Path)...")
-        subprocess.run([
-            "chroot", mount_dir, "grub-install", 
-            "--target=x86_64-efi", 
-            "--efi-directory=/boot/efi", 
-            "--bootloader-id=AetherOS", 
-            "--removable"
-        ], check=True, env=env)
+    # Запускаем grub-install прямо "изнутри" будущей системы
+    chroot_grub = f"chroot /mnt grub-install {disk}"
+    if not run_cmd(["bash", "-c", chroot_grub]):
+        print("[-] Ошибка установки загрузчика GRUB в MBR!", "\033[91m")
+        # Не забываем отмонтировать шины перед выходом при ошибке
+        for p in ["/run", "/sys", "/proc", "/dev"]: run_cmd(["umount", f"/mnt{p}"])
+        return False
         
-        print("[!] Генерация конфигурационного файла grub.cfg...")
-        # update-grub автоматически вызывает grub-mkconfig с правильными путями в Debian/Ubuntu
-        try:
-            subprocess.run(["chroot", mount_dir, "update-grub"], check=True, env=env)
-        except Exception:
-            subprocess.run(["chroot", mount_dir, "grub-mkconfig", "-o", "/boot/grub/grub.cfg"], check=True, env=env)
+    # Отмонтируем системные шины обратно
+    for p in ["/run", "/sys", "/proc", "/dev"]: 
+        run_cmd(["umount", "-l", f"/mnt{p}"])
+    
+    print("7. Генерация grub.cfg...", "\033[96m")
+    os.makedirs("/mnt/boot/grub", exist_ok=True)
+    
+    import glob
+    
+    # Динамический поиск файлов ядра и initrd
+    vmlinuz_files = glob.glob("/mnt/boot/vmlinuz-*")
+    initrd_files = glob.glob("/mnt/boot/initrd.img-*")
+    
+    # Если файлы найдены, отрезаем префикс /mnt, чтобы путь был правильным для GRUB
+    kernel_path = vmlinuz_files[0].replace("/mnt", "") if vmlinuz_files else "/boot/vmlinuz"
+    initrd_path = initrd_files[0].replace("/mnt", "") if initrd_files else "/boot/initrd.img"
 
-        print("\n[!] Завершение работы с диском и размонтирование разделов...")
-        # Размонтируем виртуальные папки
-        for vfs in reversed(vfs_mounted):
-            subprocess.run(["umount", f"{mount_dir}/{vfs}"], check=True, env=env)
-        vfs_mounted.clear()
-        
-        # Размонтируем основные разделы диска
-        subprocess.run(["umount", boot_efi_dir], check=True, env=env)
-        subprocess.run(["umount", mount_dir], check=True, env=env)
+    with open("/mnt/boot/grub/grub.cfg", "w") as f:
+        f.write("set timeout=3\n")
+        f.write("set default=0\n")
+        f.write("menuentry 'AetherOS (Installed)' {\n")
+        f.write("    insmod part_msdos\n")
+        f.write("    insmod ext2\n")
+        f.write("    set root='(hd0,msdos1)'\n")
+        f.write(f"    linux {kernel_path} root={mount_point} ro quiet\n")
+        f.write(f"    initrd {initrd_path}\n")
+        f.write("}\n")
 
-        print("\n[+] УСТАНОВКА ЗАВЕРШЕНА УСПЕШНО!")
-        print("[!] Перезагрузите компьютер, предварительно извлекая Live-носитель.")
+    print("8. Очистка и размонтирование...", "\033[96m")
+    run_cmd(["umount", "/mnt"])
 
-    except Exception as e:
-        print(f"\n[-] Ошибка в процессе установки системы: {e}")
-        print("[!] Пытаемся безопасно размонтировать оставшиеся ресурсы...")
-        
-        # Экстренное размонтирование в случае падения на каком-то из шагов
-        for vfs in reversed(vfs_mounted):
-            try: subprocess.run(["umount", f"{mount_dir}/{vfs}"], env=env, capture_output=True)
-            except Exception: pass
-        try: subprocess.run(["umount", boot_efi_dir], env=env, capture_output=True)
-        except Exception: pass
-        try: subprocess.run(["umount", mount_dir], env=env, capture_output=True)
-        except Exception: pass
-        print("[!] Очистка завершена. Проверьте логи.")
+    print("=== УСТАНОВКА ЗАВЕРШЕНА! МОЖНО ПЕРЕЗАГРУЖАТЬСЯ ===", "\033[92m")
+    return True
 
 def show_help():
     """Автоматический генератор справки по системе и модулям"""
