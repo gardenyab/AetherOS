@@ -39,8 +39,13 @@ class Installler:
 
         self._log("3. Монтирование...", "\033[96m")
         os.makedirs("/mnt", exist_ok=True)
-        self._run_cmd(["umount", "-q", "/mnt"]) # На всякий случай отмонтируем, если что-то зависло
-        if not self._run_cmd(["mount", part, "/mnt"]): return False
+        
+        # Безопасное размонтирование без ломающих флагов
+        subprocess.run(["umount", "-l", "/mnt"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        
+        if not self._run_cmd(["mount", part, "/mnt"]): 
+            self._log("[-] Ошибка монтирования раздела!", "\033[91m")
+            return False
 
         self._log("4. Копирование файлов (rsync)...", "\033[96m")
         rsync_cmd = [
