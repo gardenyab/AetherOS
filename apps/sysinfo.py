@@ -20,7 +20,6 @@ class SysInfo:
 
         console = Console()
 
-        # 1. Fetch Uptime
         try:
             with open("/proc/uptime", "r") as f:
                 uptime_seconds = float(f.readline().split()[0])
@@ -30,45 +29,43 @@ class SysInfo:
         except:
             uptime_str = "Unknown"
 
-        # 2. Fetch RAM Info
         try:
             with open("/proc/meminfo", "r") as f:
                 lines = f.readlines()
                 total = int(lines[0].split()[1]) // 1024
                 free = int(lines[1].split()[1]) // 1024
-                # Simplistic approach, ignoring buffers/cached for layout cleanliness
                 used = total - free
                 ram_str = f"{used} MB / {total} MB"
         except:
             ram_str = "Unknown"
 
-        # 3. Fetch CPU Info (Model Name)
         cpu_model = "Unknown Processor"
         try:
             with open("/proc/cpuinfo", "r") as f:
                 for line in f:
                     if "model name" in line:
                         cpu_model = line.split(":", 1)[1].strip()
-                        # Shorten if too long for clean fetch look
                         if len(cpu_model) > 30:
                             cpu_model = cpu_model[:27] + "..."
                         break
         except:
             pass
 
-        # ASCII Art for AetherOS
         ascii_logo = (
             "[bold cyan]"
-            "   /\   |  | |_  \n"
-            "  /  \  |--| |--  \n"
-            " /____\ |  | |___ \n"
-            "   __   ____  ____\n"
-            "  /  \  |___  |   \n"
-            "  \__/   ___| |___"
+            "      .8.          \n"
+            "     .888.         \n"
+            "    :88888.        \n"
+            "   . `88888.       \n"
+            "  .8. `88888.      \n"
+            " .8`8. `88888.     \n"
+            ".8' `8. `88888.    \n"
+            ".8'   `8. `88888.  \n"
+            ".888888888. `88888.\n"
+            ".8'     `8. `88888."
             "[/bold cyan]"
         )
 
-        # Fastfetch-style stats block
         fetch_stats = (
             f"[bold cyan]OS:[/bold cyan] AetherOS\n"
             f"[bold cyan]Kernel:[/bold cyan] Linux 6.12.94+deb13-amd64\n"
@@ -78,7 +75,6 @@ class SysInfo:
             f"[bold cyan]Shell:[/bold cyan] Python Environment"
         )
 
-        # Render side-by-side using Columns
         logo_panel = Panel(ascii_logo, expand=False, border_style="cyan")
         stats_panel = Panel(fetch_stats, title="[bold white]System Info[/bold white]", expand=False, border_style="magenta")
 
