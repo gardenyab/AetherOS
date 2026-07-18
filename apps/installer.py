@@ -6,12 +6,10 @@ import glob
 class SystemInstaller:
     """System Installer module for AetherOS (Legacy/MBR)"""
     
-    # Dependencies for AetherOS package manager
     requirements = []
     requirementsApt = ["parted", "e2fsprogs", "rsync"]
 
     def _log(self, text, color=""):
-        # Terminal coloring
         print(f"{color}{text}\033[0m")
     
     def _run_cmd(self, cmd):
@@ -32,10 +30,8 @@ class SystemInstaller:
             self._log(f"[-] Critical Error: Target disk {disk} not found!", "\033[91m")
             return False
 
-        # --- PRE-INSTALLATION CHECK (Is system already installed?) ---
         self._log("[*] Checking target disk state...", "\033[96m")
         try:
-            # Check if /dev/sda1 already contains an ext4 filesystem
             check_fs = subprocess.run(["blkid", "-o", "value", "-s", "TYPE", part], 
                                       capture_output=True, text=True)
             is_installed = "ext4" in check_fs.stdout.strip()
@@ -46,7 +42,6 @@ class SystemInstaller:
             self._log("\n[!] WARNING: AetherOS or another OS seems to be already installed on /dev/sda1!", "\033[91m")
             self._log("[!] Proceeding will completely ERASE all data on this disk!", "\033[91m")
             
-            # Interactive confirmation loop compatible with shell/threads
             import asyncio
             try:
                 confirm = input("Are you absolutely sure you want to reinstall? (yes/no): ").strip().lower()
@@ -57,25 +52,21 @@ class SystemInstaller:
                 self._log("[-] Installation aborted by user.", "\033[93m")
                 return False
 
-        # --- STEP 0: PREPARE LIVE ENVIRONMENT TOOLS ---
         self._log("\n0. Preparing live environment partitioning tools...", "\033[96m")
         self._run_cmd(["apt-get", "update", "-qq"])
         if not self._run_cmd(["apt-get", "install", "-y", "--no-install-recommends", "e2fsprogs", "parted", "rsync"]):
             self._log("[-] Warning: Failed to update live tools, trying to proceed with existing ones...", "\033[93m")
 
-        # --- STEP 1: PARTITIONING ---
         self._log("1. Partitioning target disk (MBR/MSDOS)...", "\033[96m")
         if not self._run_cmd(["parted", "-s", disk, "mklabel", "msdos"]): return False
         if not self._run_cmd(["parted", "-s", disk, "mkpart", "primary", "ext4", "1MiB", "100%"]): return False
         if not self._run_cmd(["parted", "-s", disk, "set", "1", "boot", "on"]): return False
 
-        # --- STEP 2: FORMATTING ---
         self._log("2. Formatting partition to ext4...", "\033[96m")
         if not self._run_cmd(["mkfs.ext4", "-F", part]):
             self._log("[-] Error: Formatting failed! mkfs.ext4 might be missing.", "\033[91m")
             return False
 
-        # --- STEP 3: MOUNTING ---
         self._log("3. Mounting target partition...", "\033[96m")
         os.makedirs("/mnt", exist_ok=True)
         subprocess.run(["umount", "-l", "/mnt"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
@@ -83,7 +74,6 @@ class SystemInstaller:
             self._log("[-] Error: Failed to mount target partition!", "\033[91m")
             return False
 
-        # --- STEP 4: SYSTEM COPY ---
         self._log("4. Copying system files (rsync)...", "\033[96m")
         rsync_cmd = [
             "rsync", "-aHAXx", 
@@ -94,7 +84,6 @@ class SystemInstaller:
         ]
         if not self._run_cmd(rsync_cmd): return False
 
-        # --- STEP 4.5: KERNEL DEPLOYMENT ---
         self._log("4.5. Deploying kernel from Live ISO image...", "\033[96m")
         os.makedirs("/mnt/boot", exist_ok=True)
         
@@ -106,7 +95,6 @@ class SystemInstaller:
             self._log("[-] Critical Error: vmlinuz kernel not found on Live ISO!", "\033[91m")
             return False
 
-        # --- STEP 5: FSTAB ---
         self._log("5. Generating /etc/fstab configuration...", "\033[96m")
         try:
             uuid = subprocess.check_output(["blkid", "-s", "UUID", "-o", "value", part]).decode().strip()
@@ -117,7 +105,6 @@ class SystemInstaller:
         with open("/mnt/etc/fstab", "w") as fst:
             fst.write(f"{mount_point}  /  ext4  errors=remount-ro  0  1\n")
 
-        # --- STEP 5.5: CHROOT BIND MOUNTING ---
         self._log("5.5. Binding system dirs and updating chroot environment...", "\033[96m")
         self._run_cmd(["mount", "--bind", "/dev", "/mnt/dev"])
         self._run_cmd(["mount", "--bind", "/proc", "/mnt/proc"])
@@ -134,7 +121,6 @@ class SystemInstaller:
         apt_cmd = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends grub-pc os-prober extlinux initramfs-tools"
         self._run_cmd(["chroot", "/mnt", "bash", "-c", apt_cmd])
 
-        # --- STEP 5.6: INITRD CREATION ---
         self._log("[*] Building custom initrd.img inside target system...", "\033[96m")
         gen_initrd_cmd = "update-initramfs -c -k 6.12.94+deb13-amd64"
         if not self._run_cmd(["chroot", "/mnt", "bash", "-c", gen_initrd_cmd]):
@@ -142,7 +128,6 @@ class SystemInstaller:
         else:
             self._log("[+] initrd.img generated successfully!", "\033[92m")
 
-        # --- STEP 6: GRUB INSTALLATION ---
         self._log("6. Installing GRUB bootloader into MBR...", "\033[96m")
         chroot_grub = f"chroot /mnt grub-install {disk}"
         if not self._run_cmd(["bash", "-c", chroot_grub]):
@@ -150,7 +135,6 @@ class SystemInstaller:
             for p in ["/run", "/sys", "/proc", "/dev"]: self._run_cmd(["umount", "-l", f"/mnt{p}"])
             return False
             
-        # --- STEP 7: GRUB CONFIGURATION ---
         self._log("7. Generating grub.cfg config file...", "\033[96m")
         os.makedirs("/mnt/boot/grub", exist_ok=True)
         
@@ -171,7 +155,6 @@ class SystemInstaller:
             f.write(f"    initrd {initrd_path}\n")
             f.write("}\n")
 
-        # --- STEP 8: CLEANUP ---
         self._log("8. Cleaning up and unmounting directories...", "\033[96m")
         for p in ["/run", "/sys", "/proc", "/dev"]: 
             self._run_cmd(["umount", "-l", f"/mnt{p}"])

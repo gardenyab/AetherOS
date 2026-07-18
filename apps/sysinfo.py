@@ -4,7 +4,6 @@ import sys
 class SysInfo:
     """System and Network monitoring utility for AetherOS"""
     
-    # Packets required for AetherOS plugin manager
     requirements = ["rich"]
     requirementsApt = ["iputils-ping"]
 
