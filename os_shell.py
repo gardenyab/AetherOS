@@ -149,6 +149,18 @@ def install_system_to_disk():
     vfs_mounted = []
 
     try:
+        print(f"[!] Подготовка диска {target_disk} (отмонтирование активных разделов)...")
+        try:
+            # Ищем в /proc/mounts любые упоминания разделов этого диска и размонтируем их
+            with open("/proc/mounts", "r") as f:
+                for line in f:
+                    if target_disk in line:
+                        mount_point = line.split()[1]
+                        subprocess.run(["umount", "-l", mount_point], env=env, capture_output=True)
+            # На всякий случай гасим swap, если он был на этом диске
+            subprocess.run(["swapoff", "-a"], env=env, capture_output=True)
+        except Exception:
+            pass
         print(f"\n[1/5] Очистка и разметка диска {target_disk} (GPT)...")
         subprocess.run(["parted", "-s", target_disk, "mklabel", "gpt"], check=True, env=env)
         subprocess.run(["parted", "-s", target_disk, "mkpart", "ESP", "fat32", "1MiB", "513MiB"], check=True, env=env)
