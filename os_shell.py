@@ -91,7 +91,7 @@ def download_app(url):
             print(f"[!] Обнаружены pip-зависимости класса: {', '.join(reqs)}")
             print("[!] Установка зависимостей через pip...")
             try:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", *reqs])
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "--break-system-packages", *reqs])
                 print("[+] Все зависимости успешно установлены!")
             except Exception as pip_err:
                 print(f"[-] Ошибка при установке пакетов через pip: {pip_err}")
