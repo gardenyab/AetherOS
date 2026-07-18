@@ -18,7 +18,7 @@ class AppStore:
         except Exception:
             self.data = {} 
     
-    def showApps(self):
+    def show_apps(self):
         text = []
         for i in self.data:
             text.append(f"•. {i} - {self.data['i']['version']}.\n    {self.data['i']['description']}")
