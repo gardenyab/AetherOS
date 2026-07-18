@@ -57,8 +57,42 @@ class Installler:
         ]
         if not self._run_cmd(rsync_cmd): return False
 
+        self._log("4.5. Извлечение ядра и initrd с CD-ROM...", "\033[96m")
+        os.makedirs("/tmp/cdrom", exist_ok=True)
+        os.makedirs("/mnt/boot", exist_ok=True)
+        
+        # Перебираем возможные устройства CD-ROM в QEMU
+        cd_mounted = False
+        for cd_dev in ["/dev/sr0", "/dev/cdrom"]:
+            # Принудительно отмонтируем перед попыткой
+            subprocess.run(["umount", "-l", "/tmp/cdrom"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+            if self._run_cmd(["mount", "-o", "ro", cd_dev, "/tmp/cdrom"]):
+                cd_mounted = True
+                break
+                
+        if cd_mounted:
+            import glob
+            # Ищем ядро и initrd в стандартных для Live-ISO путях (/boot или /live)
+            cd_kernels = glob.glob("/tmp/cdrom/boot/vmlinuz*") + glob.glob("/tmp/cdrom/live/vmlinuz*")
+            cd_initrds = glob.glob("/tmp/cdrom/boot/initrd*") + glob.glob("/tmp/cdrom/live/initrd*")
+            
+            if cd_kernels:
+                self._log(f"[+] Найдено ядро на CD: {cd_kernels[0]}", "\033[92m")
+                self._run_cmd(["cp", "-v", cd_kernels[0], "/mnt/boot/vmlinuz-6.12.94+deb13-amd64"])
+            else:
+                self._log("[-] Ядро на CD-ROM не обнаружено!", "\033[91m")
+
+            if cd_initrds:
+                self._log(f"[+] Найден initrd на CD: {cd_initrds[0]}", "\033[92m")
+                self._run_cmd(["cp", "-v", cd_initrds[0], "/mnt/boot/initrd.img-6.12.94+deb13-amd64"])
+            else:
+                self._log("[-] Initrd на CD-ROM не обнаружен!", "\033[91m")
+                
+            self._run_cmd(["umount", "/tmp/cdrom"])
+        else:
+            self._log("[-] Не удалось примонтировать CD-ROM! Файлы ядра могут отсутствовать.", "\033[91m")
+
         self._log("5. Подготовка fstab...", "\033[96m")
-        # Пытаемся получить UUID для надежной загрузки, если не выйдет — используем part
         try:
             uuid = subprocess.check_output(["blkid", "-s", "UUID", "-o", "value", part]).decode().strip()
             mount_point = f"UUID={uuid}"
@@ -70,21 +104,18 @@ class Installler:
 
         self._log("6. Установка GRUB (через chroot)...", "\033[96m")
         
-        # Для правильной работы grub-install внутри chroot ему нужны системные директории
+        # Монтируем виртуальные ФС для корректного инсталла GRUB внутри окружения
         self._run_cmd(["mount", "--bind", "/dev", "/mnt/dev"])
         self._run_cmd(["mount", "--bind", "/proc", "/mnt/proc"])
         self._run_cmd(["mount", "--bind", "/sys", "/mnt/sys"])
         self._run_cmd(["mount", "--bind", "/run", "/mnt/run"])
 
-        # Запускаем grub-install прямо "изнутри" будущей системы
         chroot_grub = f"chroot /mnt grub-install {disk}"
         if not self._run_cmd(["bash", "-c", chroot_grub]):
             self._log("[-] Ошибка установки загрузчика GRUB в MBR!", "\033[91m")
-            # Не забываем отмонтировать шины перед выходом при ошибке
-            for p in ["/run", "/sys", "/proc", "/dev"]: self._run_cmd(["umount", f"/mnt{p}"])
+            for p in ["/run", "/sys", "/proc", "/dev"]: self._run_cmd(["umount", "-l", f"/mnt{p}"])
             return False
             
-        # Отмонтируем системные шины обратно
         for p in ["/run", "/sys", "/proc", "/dev"]: 
             self._run_cmd(["umount", "-l", f"/mnt{p}"])
         
@@ -93,13 +124,11 @@ class Installler:
         
         import glob
         
-        # Динамический поиск файлов ядра и initrd
         vmlinuz_files = glob.glob("/mnt/boot/vmlinuz-*")
         initrd_files = glob.glob("/mnt/boot/initrd.img-*")
         
-        # Если файлы найдены, отрезаем префикс /mnt, чтобы путь был правильным для GRUB
-        kernel_path = vmlinuz_files[0].replace("/mnt", "") if vmlinuz_files else "/boot/vmlinuz"
-        initrd_path = initrd_files[0].replace("/mnt", "") if initrd_files else "/boot/initrd.img"
+        kernel_path = vmlinuz_files[0].replace("/mnt", "") if vmlinuz_files else "/boot/vmlinuz-6.12.94+deb13-amd64"
+        initrd_path = initrd_files[0].replace("/mnt", "") if initrd_files else "/boot/initrd.img-6.12.94+deb13-amd64"
 
         with open("/mnt/boot/grub/grub.cfg", "w") as f:
             f.write("set timeout=3\n")
@@ -113,7 +142,7 @@ class Installler:
             f.write("}\n")
 
         self._log("8. Очистка и размонтирование...", "\033[96m")
-        self._run_cmd(["umount", "/mnt"])
+        self._run_cmd(["umount", "-l", "/mnt"])
 
         self._log("=== УСТАНОВКА ЗАВЕРШЕНА! МОЖНО ПЕРЕЗАГРУЖАТЬСЯ ===", "\033[92m")
         return True
