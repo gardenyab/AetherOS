@@ -1,12 +1,12 @@
 class Calc:
-    """Обычный калькулятор для вычислений"""
+    """тестовый калькулятор"""
     
     def calc(self, args):
         """пишет ок"""
         print("ok")
 
     def sum(self, args):
-        """складывает переданные числа"""
+        """складывает числа"""
         try:
             result = sum(float(x) for x in args)
             print(f"Сумма: {result}")
