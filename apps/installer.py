@@ -60,30 +60,30 @@ class Installler:
         ]
         if not self._run_cmd(rsync_cmd): return False
 
-        self._log("4.5. Копирование ядра и initrd из Live-окружения...", "\033[96m")
+        self._log("4.5. Поиск и копирование ядра и initrd...", "\033[96m")
         os.makedirs("/mnt/boot", exist_ok=True)
         
-        # Путь, куда система сама примонтировала наш ISO
-        live_iso_path = "/run/initramfs/memory/data/linux/boot"
-        
-        import glob
-        # Ищем файлы прямо в системной точке монтирования ISO
-        iso_kernels = glob.glob(f"{live_iso_path}/vmlinuz*")
-        iso_initrds = glob.glob(f"{live_iso_path}/initrd*")
-        
-        if iso_kernels:
-            self._log(f"[+] Найдено ядро на ISO: {iso_kernels[0]}", "\033[92m")
-            self._run_cmd(["cp", "-v", iso_kernels[0], "/mnt/boot/vmlinuz-6.12.94+deb13-amd64"])
-        else:
-            self._log("[-] Ядро на ISO не найдено! Пробуем скопировать из RAM...", "\033[93m")
-            self._run_cmd(["cp", "-v", "/boot/vmlinuz-6.12.94+deb13-amd64", "/mnt/boot/"])
+        # Функция-поиск через find
+        def find_file(pattern):
+            # Ищем внутри примонтированного ISO (папка data)
+            result = subprocess.run(["find", "/run/initramfs/memory/data/", "-name", pattern], 
+                                   capture_output=True, text=True)
+            files = result.stdout.splitlines()
+            return files[0] if files else None
 
-        if iso_initrds:
-            self._log(f"[+] Найден initrd на ISO: {iso_initrds[0]}", "\033[92m")
-            self._run_cmd(["cp", "-v", iso_initrds[0], "/mnt/boot/initrd.img-6.12.94+deb13-amd64"])
+        # Ищем ядро и initrd (используем звездочку для поиска любой версии)
+        kernel = find_file("vmlinuz*")
+        initrd = find_file("initrd*")
+
+        if kernel:
+            self._log(f"[+] Найдено ядро: {kernel}", "\033[92m")
+            self._run_cmd(["cp", "-v", kernel, "/mnt/boot/vmlinuz-6.12.94+deb13-amd64"])
+        
+        if initrd:
+            self._log(f"[+] Найден initrd: {initrd}", "\033[92m")
+            self._run_cmd(["cp", "-v", initrd, "/mnt/boot/initrd.img-6.12.94+deb13-amd64"])
         else:
-            self._log("[-] Initrd на ISO не найден! Пробуем скопировать из RAM...", "\033[93m")
-            self._run_cmd(["cp", "-v", "/boot/initrd.img-6.12.94+deb13-amd64", "/mnt/boot/"])
+            self._log("[-] Initrd не найден на ISO! Проверь содержимое ISO вручную.", "\033[91m")
 
         self._log("5. Подготовка fstab...", "\033[96m")
         try:
