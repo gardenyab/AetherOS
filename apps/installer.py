@@ -27,6 +27,12 @@ class Installler:
             self._log(f"[-] Ошибка: Диск {disk} не найден!", "\033[91m")
             return False
 
+        # --- ШАГ 0: УСТАНОВКА УТИЛИТ ФОРМАТИРОВАНИЯ В LIVE-СИСТЕМУ ---
+        self._log("0. Подготовка утилит форматирования (Live)...", "\033[96m")
+        self._run_cmd(["apt-get", "update"])
+        if not self._run_cmd(["apt-get", "install", "-y", "--no-install-recommends", "e2fsprogs", "parted"]):
+            self._log("[-] Предупреждение: Не удалось установить e2fsprogs/parted, пробуем продолжить...", "\033[93m")
+
         self._log("1. Разметка диска (MBR)...", "\033[96m")
         if not self._run_cmd(["parted", "-s", disk, "mklabel", "msdos"]): return False
         if not self._run_cmd(["parted", "-s", disk, "mkpart", "primary", "ext4", "1MiB", "100%"]): return False
@@ -34,15 +40,12 @@ class Installler:
 
         self._log("2. Форматирование в ext4...", "\033[96m")
         if not self._run_cmd(["mkfs.ext4", "-F", part]):
-            self._log("[-] Ошибка форматирования!", "\033[91m")
+            self._log("[-] Ошибка форматирования! Возможно, mkfs.ext4 отсутствует.", "\033[91m")
             return False
 
         self._log("3. Монтирование...", "\033[96m")
         os.makedirs("/mnt", exist_ok=True)
-        
-        # Безопасное размонтирование без ломающих флагов
         subprocess.run(["umount", "-l", "/mnt"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-        
         if not self._run_cmd(["mount", part, "/mnt"]): 
             self._log("[-] Ошибка монтирования раздела!", "\033[91m")
             return False
@@ -61,10 +64,8 @@ class Installler:
         os.makedirs("/tmp/cdrom", exist_ok=True)
         os.makedirs("/mnt/boot", exist_ok=True)
         
-        # Перебираем возможные устройства CD-ROM в QEMU
         cd_mounted = False
         for cd_dev in ["/dev/sr0", "/dev/cdrom"]:
-            # Принудительно отмонтируем перед попыткой
             subprocess.run(["umount", "-l", "/tmp/cdrom"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
             if self._run_cmd(["mount", "-o", "ro", cd_dev, "/tmp/cdrom"]):
                 cd_mounted = True
@@ -72,25 +73,16 @@ class Installler:
                 
         if cd_mounted:
             import glob
-            # Ищем ядро и initrd в стандартных для Live-ISO путях (/boot или /live)
             cd_kernels = glob.glob("/tmp/cdrom/boot/vmlinuz*") + glob.glob("/tmp/cdrom/live/vmlinuz*")
             cd_initrds = glob.glob("/tmp/cdrom/boot/initrd*") + glob.glob("/tmp/cdrom/live/initrd*")
             
             if cd_kernels:
                 self._log(f"[+] Найдено ядро на CD: {cd_kernels[0]}", "\033[92m")
                 self._run_cmd(["cp", "-v", cd_kernels[0], "/mnt/boot/vmlinuz-6.12.94+deb13-amd64"])
-            else:
-                self._log("[-] Ядро на CD-ROM не обнаружено!", "\033[91m")
-
             if cd_initrds:
                 self._log(f"[+] Найден initrd на CD: {cd_initrds[0]}", "\033[92m")
                 self._run_cmd(["cp", "-v", cd_initrds[0], "/mnt/boot/initrd.img-6.12.94+deb13-amd64"])
-            else:
-                self._log("[-] Initrd на CD-ROM не обнаружен!", "\033[91m")
-                
             self._run_cmd(["umount", "/tmp/cdrom"])
-        else:
-            self._log("[-] Не удалось примонтировать CD-ROM! Файлы ядра могут отсутствовать.", "\033[91m")
 
         self._log("5. Подготовка fstab...", "\033[96m")
         try:
@@ -102,28 +94,33 @@ class Installler:
         with open("/mnt/etc/fstab", "w") as fst:
             fst.write(f"{mount_point}  /  ext4  errors=remount-ro  0  1\n")
 
-        self._log("6. Установка GRUB (через chroot)...", "\033[96m")
-        
-        # Монтируем виртуальные ФС для корректного инсталла GRUB внутри окружения
+        self._log("5.5. Монтирование окружения и установка зависимостей GRUB...", "\033[96m")
         self._run_cmd(["mount", "--bind", "/dev", "/mnt/dev"])
         self._run_cmd(["mount", "--bind", "/proc", "/mnt/proc"])
         self._run_cmd(["mount", "--bind", "/sys", "/mnt/sys"])
         self._run_cmd(["mount", "--bind", "/run", "/mnt/run"])
 
+        if os.path.exists("/etc/resolv.conf"):
+            self._run_cmd(["cp", "-L", "/etc/resolv.conf", "/mnt/etc/resolv.conf"])
+
+        self._log("[*] Обновление пакетов в chroot...", "\033[96m")
+        self._run_cmd(["chroot", "/mnt", "apt-get", "update"])
+        
+        self._log("[*] Установка grub-pc и os-prober...", "\033[96m")
+        apt_cmd = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends grub-pc os-prober extlinux"
+        self._run_cmd(["chroot", "/mnt", "bash", "-c", apt_cmd])
+
+        self._log("6. Установка GRUB в MBR...", "\033[96m")
         chroot_grub = f"chroot /mnt grub-install {disk}"
         if not self._run_cmd(["bash", "-c", chroot_grub]):
             self._log("[-] Ошибка установки загрузчика GRUB в MBR!", "\033[91m")
             for p in ["/run", "/sys", "/proc", "/dev"]: self._run_cmd(["umount", "-l", f"/mnt{p}"])
             return False
             
-        for p in ["/run", "/sys", "/proc", "/dev"]: 
-            self._run_cmd(["umount", "-l", f"/mnt{p}"])
-        
         self._log("7. Генерация grub.cfg...", "\033[96m")
         os.makedirs("/mnt/boot/grub", exist_ok=True)
         
         import glob
-        
         vmlinuz_files = glob.glob("/mnt/boot/vmlinuz-*")
         initrd_files = glob.glob("/mnt/boot/initrd.img-*")
         
@@ -142,6 +139,8 @@ class Installler:
             f.write("}\n")
 
         self._log("8. Очистка и размонтирование...", "\033[96m")
+        for p in ["/run", "/sys", "/proc", "/dev"]: 
+            self._run_cmd(["umount", "-l", f"/mnt{p}"])
         self._run_cmd(["umount", "-l", "/mnt"])
 
         self._log("=== УСТАНОВКА ЗАВЕРШЕНА! МОЖНО ПЕРЕЗАГРУЖАТЬСЯ ===", "\033[92m")
